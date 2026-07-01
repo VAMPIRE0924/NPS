@@ -1,6 +1,6 @@
 # NPS
 
-本仓库基于[NPS](https://github.com/ehang-io/nps)进行重构，优化了Web控制端的一些细节，重构了一部分功能，并保持兼容原版NPC接入
+本仓库基于[NPS](https://github.com/ehang-io/nps)进行重构，并保持兼容原版NPC接入
 
 ## 功能特性
 
