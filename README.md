@@ -1,86 +1,137 @@
+# NPS Refactor
 
-# NPS
-![](https://img.shields.io/github/stars/ehang-io/nps.svg)   ![](https://img.shields.io/github/forks/ehang-io/nps.svg)
-[![Gitter](https://badges.gitter.im/cnlh-nps/community.svg)](https://gitter.im/cnlh-nps/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
-![Release](https://github.com/ehang-io/nps/workflows/Release/badge.svg)
-![GitHub All Releases](https://img.shields.io/github/downloads/ehang-io/nps/total)
+这是一个面向后续设备管理平台二次开发的 NPS 服务端重构版。
 
-[README](https://github.com/ehang-io/nps/blob/master/README.md)|[中文文档](https://github.com/ehang-io/nps/blob/master/README_zh.md)
+本仓库只维护改造后的 NPS 后端源码、Web 管理端源码、必要配置样例和 API 文档。现有原版或第三方 NPC 客户端保持兼容，不需要重新编译或替换。
 
-NPS is a lightweight, high-performance, powerful **intranet penetration** proxy server, with a powerful web management terminal.
+## 改造目标
 
+- 每个功能面使用独立 ID 池。
+- 新增对象时永远取当前池内最小可用正整数 ID。
+- 删除 ID 后，下次新增可以自动复用被删除的小 ID。
+- TCP/UDP 不再作为两个后台功能维护，统一为一个端口转发规则。
+- 每个客户端自动绑定一个托管 SOCKS5 代理。
+- SOCKS5 代理默认关闭，只允许在管理端/API 中打开或关闭。
+- NPC 上报的 Basic 认证用户名和密码无效化，Basic 只由 NPS 服务端配置控制。
 
-![image](https://github.com/ehang-io/nps/blob/master/image/web.png?raw=true)
+## ID 规则
 
-## Feature
+独立 ID 池：
 
-- Comprehensive protocol support, compatible with almost all commonly used protocols, such as tcp, udp, http(s), socks5, p2p, http proxy ...
-- Full platform compatibility (linux, windows, macos, Synology, etc.), support installation as a system service simply.
-- Comprehensive control, both client and server control are allowed.
-- Https integration, support to convert backend proxy and web services to https, and support multiple certificates.
-- Just simple configuration on web ui can complete most requirements.
-- Complete information display, such as traffic, system information, real-time bandwidth, client version, etc.
-- Powerful extension functions, everything is available (cache, compression, encryption, traffic limit, bandwidth limit, port reuse, etc.)
-- Domain name resolution has functions such as custom headers, 404 page configuration, host modification, site protection, URL routing, and pan-resolution.
-- Multi-user and user registration support on server.
+```text
+Client.Id
+Host.Id
+portForward.Id
+socks5.Id
+httpProxy.Id
+secret.Id
+p2p.Id
+file.Id
+```
 
-**Didn't find the feature you want? It doesn't matter, click [Enter the document](https://ehang-io.github.io/nps/) to find it!**
+任务内部唯一键为：
 
-## Quick start
+```text
+mode:id
+```
 
-### Installation
+例如：
 
-> [releases](https://github.com/ehang-io/nps/releases)
+```text
+portForward:1
+socks5:1
+httpProxy:1
+```
 
-Download the corresponding system version, the server and client are separate.
+这意味着不同功能可以同时拥有自己的 `ID=1`，互不冲突。
 
-### Server start
+## SOCKS5 托管规则
 
-After downloading the server compressed package, unzip it, and then enter the unzipped folder.
+新增客户端后，系统自动创建对应的 SOCKS5 代理：
 
-- execute installation command
+```text
+socks5.Id        = Client.Id
+socks5.Client.Id = Client.Id
+socks5.Port      = 10000 + Client.Id
+socks5.Remark    = Client.Remark
+```
 
-For linux、darwin ```sudo ./nps install```
+行为：
 
-For windows, run cmd as administrator and enter the installation directory ```nps.exe install```
+```text
+新增客户端      -> 自动创建关闭状态的 SOCKS5
+修改客户端备注  -> 同步 SOCKS5 备注
+删除客户端      -> 删除对应 SOCKS5
+SOCKS5 页面     -> 只能查看和开关，不能新增/编辑/删除
+无流量 30 分钟  -> 自动关闭 SOCKS5 并持久化 Status=false
+```
 
-- default ports
+## 端口转发
 
-The default configuration file of nps use 80，443，8080，8024 ports
+端口转发统一使用：
 
-80 and 443 ports for host mode default ports
+```text
+portForward
+```
 
-8080 for web management access port
+一个 `portForward` 规则会同时监听同一个端口的 TCP 和 UDP。
 
-8024 for net bridge port, to communicate between server and client
+旧 NPC 配置中如果上报 `mode=tcp` 或 `mode=udp`，NPS 会在服务端归一为 `portForward`，但实际链路协议仍然保持 NPC 原有的 `CONN_TCP` / `CONN_UDP`，所以现有 NPC 不需要改。
 
-- start up
+## Basic 认证
 
-For linux、darwin ```sudo nps start```
+Basic 认证用户名和密码只能由 NPS 服务端配置：
 
-For windows, run cmd as administrator and enter the program directory ```nps.exe start```
+```text
+Web/API 中的 u / p                       -> 有效
+NPC 配置中的 basic_username/basic_password -> NPS 入库前清空，不采信
+```
 
-```After installation, the windows configuration file is located at C:\Program Files\nps, linux or darwin is located at /etc/nps```
+## 构建
 
-**If you don't find it started successfully, you can check the log (Windows log files are located in the current running directory, linux and darwin are located in /var/log/nps.log).**
+Windows amd64:
 
-- Access server IP:web service port (default is 8080).
-- Login with username and password (default is admin/123, must be modified when officially used).
-- Create a client.
+```powershell
+go build -trimpath -ldflags='-s -w' -o dist/windows_amd64/nps.exe ./cmd/nps
+```
 
-### Client connection
-- Click the + sign in front of the client in web management and copy the startup command.
-- Execute the startup command, Linux can be executed directly, Windows will replace ./npc with npc.exe and execute it with cmd.
+Linux amd64:
 
+```powershell
+$env:GOOS='linux'
+$env:GOARCH='amd64'
+go build -trimpath -ldflags='-s -w' -o dist/linux_amd64/nps ./cmd/nps
+Remove-Item Env:\GOOS
+Remove-Item Env:\GOARCH
+```
 
-If you need to register to the system service, you can check [Register to the system service](https://ehang-io.github.io/nps/#/use?id=注册到系统服务)
+部署时需要同时带上匹配源码版本的 `web/` 目录：
 
-### Configuration
-- After the client connects, configure the corresponding penetration service in the web.
-- For more advanced usage, see [Complete Documentation](https://ehang-io.github.io/nps/)
+```text
+nps
+conf/
+web/
+  static/
+  views/
+```
 
-## Contribution
-- If you encounter a bug, you can submit it to the dev branch directly.
-- If you encounter a problem, you can feedback through the issue.
-- The project is under development, and there is still a lot of room for improvement. If you can contribute code, please submit PR to the dev branch.
-- If there is feedback on new features, you can feedback via issues or qq group.
+只替换二进制时，请确认服务器上的 `web/` 目录已经同步到本仓库版本。
+
+## API 文档
+
+详见 [API.md](API.md)。
+
+## 验证
+
+本重构主链路已通过：
+
+```powershell
+go test ./bridge ./client ./cmd/npc ./cmd/nps ./lib/cache ./lib/common ./lib/conn ./lib/crypt ./lib/daemon ./lib/file ./lib/goroutine ./lib/install ./lib/rate ./lib/sheap ./lib/version ./server ./server/connection ./server/proxy ./server/test ./server/tool ./web/controllers ./web/routers
+go vet ./bridge ./cmd/nps ./lib/cache ./lib/common ./lib/conn ./lib/crypt ./lib/daemon ./lib/file ./lib/goroutine ./lib/install ./lib/rate ./lib/sheap ./lib/version ./server ./server/connection ./server/proxy ./server/test ./server/tool ./web/controllers ./web/routers
+```
+
+`go test ./...` 仍可能命中上游/环境测试问题，例如 GUI NPC 的 OpenGL/Fyne 环境、`lib/pmux` 测试占用固定端口、旧 `lib/config` 测试夹具。这些不属于 NPS 服务端重构主链路。
+
+## 许可证与来源
+
+本项目基于 NPS 源码重构。为保持开源许可证合规，仓库保留原许可证文件 `LICENSE`。本 README 和 API 文档已针对本重构版重新编写。

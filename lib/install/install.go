@@ -142,10 +142,7 @@ func UpdateNps() {
 }
 
 func UpdateNpc() {
-	destPath := downloadLatest("client")
-	//复制文件到对应目录
-	copyStaticFile(destPath, "npc")
-	fmt.Println("Update completed, please restart")
+	fmt.Println("NPC update is not provided by this NPS refactor. Keep using your existing compatible NPC binary.")
 }
 
 type release struct {
@@ -154,7 +151,7 @@ type release struct {
 
 func downloadLatest(bin string) string {
 	// get version
-	data, err := http.Get("https://api.github.com/repos/ehang-io/nps/releases/latest")
+	data, err := http.Get("https://api.github.com/repos/VAMPIRE0924/NPS/releases/latest")
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -166,9 +163,12 @@ func downloadLatest(bin string) string {
 	json.Unmarshal(b, &rl)
 	version := rl.TagName
 	fmt.Println("the latest version is", version)
-	filename := runtime.GOOS + "_" + runtime.GOARCH + "_" + bin + ".tar.gz"
+	filename := fmt.Sprintf("nps-%s-%s-with-web.tar.gz", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		filename = fmt.Sprintf("nps-%s-%s-with-web.zip", runtime.GOOS, runtime.GOARCH)
+	}
 	// download latest package
-	downloadUrl := fmt.Sprintf("https://ehang.io/nps/releases/download/%s/%s", version, filename)
+	downloadUrl := fmt.Sprintf("https://github.com/VAMPIRE0924/NPS/releases/download/%s/%s", version, filename)
 	fmt.Println("download package from ", downloadUrl)
 	resp, err := http.Get(downloadUrl)
 	if err != nil {
@@ -183,9 +183,6 @@ func downloadLatest(bin string) string {
 		destPath = strings.Replace(destPath, `\web`, "", -1)
 		destPath = strings.Replace(destPath, "/views", "", -1)
 		destPath = strings.Replace(destPath, `\views`, "", -1)
-	} else {
-		destPath = strings.Replace(destPath, `\conf`, "", -1)
-		destPath = strings.Replace(destPath, "/conf", "", -1)
 	}
 	return destPath
 }
