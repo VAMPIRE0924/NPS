@@ -1,9 +1,8 @@
-# NPS Refactor
+# NPS
 
+本仓库提供 NPS 服务端源码、Web 管理端源码、必要配置样例和 API 文档。现有原版或第三方 NPC 客户端保持兼容，不需要重新编译或替换。
 
-本仓库只维护改造后的 NPS 后端源码、Web 管理端源码、必要配置样例和 API 文档。现有原版或第三方 NPC 客户端保持兼容，不需要重新编译或替换。
-
-## 改造内容
+## 功能特性
 
 - 每个功能面使用独立 ID 池。
 - 新增对象时永远取当前池内最小可用正整数 ID。
@@ -86,7 +85,7 @@ Web/API 中的 u / p                       -> 有效
 NPC 配置中的 basic_username/basic_password -> NPS 入库前清空，不采信
 ```
 
-Web 客户端列表支持单独或批量修改 Basic 认证用户名和密码；管理平台也可以调用 `/client/basic/` 接口完成同样操作。
+Web 客户端列表支持单独或批量修改 Basic 认证用户名和密码；也可以调用 `/client/basic/` 接口完成同样操作。
 
 ## 构建
 
@@ -121,14 +120,3 @@ web/
 ## API 文档
 
 详见 [API.md](API.md)。
-
-## 验证
-
-本重构主链路已通过：
-
-```powershell
-go test ./bridge ./client ./cmd/npc ./cmd/nps ./lib/cache ./lib/common ./lib/conn ./lib/crypt ./lib/daemon ./lib/file ./lib/goroutine ./lib/install ./lib/rate ./lib/sheap ./lib/version ./server ./server/connection ./server/proxy ./server/test ./server/tool ./web/controllers ./web/routers
-go vet ./bridge ./cmd/nps ./lib/cache ./lib/common ./lib/conn ./lib/crypt ./lib/daemon ./lib/file ./lib/goroutine ./lib/install ./lib/rate ./lib/sheap ./lib/version ./server ./server/connection ./server/proxy ./server/test ./server/tool ./web/controllers ./web/routers
-```
-
-`go test ./...` 仍可能命中上游/环境测试问题，例如 GUI NPC 的 OpenGL/Fyne 环境、`lib/pmux` 测试占用固定端口、旧 `lib/config` 测试夹具。这些不属于 NPS 服务端重构主链路。

@@ -530,7 +530,6 @@ func (s *DbUtils) UpdateClientBasic(ids []int, username, password string) (int, 
 		}
 		client.Cnf.U = username
 		client.Cnf.P = password
-		s.JsonDb.Clients.Store(client.Id, client)
 	}
 	s.JsonDb.StoreClientsToJsonFile()
 	return len(clients), nil

@@ -221,10 +221,6 @@
 		<zh-CN>连接</zh-CN>
 		<en-US>Connect</en-US>
 	</lang>
-	<lang id="word-copyright">
-		<zh-CN>版权所有</zh-CN>
-		<en-US>Copyright</en-US>
-	</lang>
 	<lang id="word-cpu">
 		<zh-CN>处理器</zh-CN>
 		<en-US>CPU</en-US>
@@ -256,10 +252,6 @@
 	<lang id="word-go">
 		<zh-CN>进入</zh-CN>
 		<en-US>go</en-US>
-	</lang>
-	<lang id="word-help">
-		<zh-CN>使用说明</zh-CN>
-		<en-US>Manual</en-US>
 	</lang>
 	<lang id="word-host">
 		<zh-CN>主机</zh-CN>
@@ -390,10 +382,6 @@
 	<lang id="word-ratelimit">
 		<zh-CN>带宽限制</zh-CN>
 		<en-US>Rate limit</en-US>
-	</lang>
-	<lang id="word-readmore">
-		<zh-CN>更多说明</zh-CN>
-		<en-US>Read more</en-US>
 	</lang>
 	<lang id="word-register">
 		<zh-CN>注册</zh-CN>
@@ -546,10 +534,6 @@
 	<lang id="word-webusername">
 		<zh-CN>Web登陆用户名</zh-CN>
 		<en-US>Username of Web login</en-US>
-	</lang>
-	<lang id="word-welcome">
-		<zh-CN>欢迎使用</zh-CN>
-		<en-US>Welcome to use</en-US>
 	</lang>
 	<lang id="word-yes">
 		<zh-CN>是</zh-CN>

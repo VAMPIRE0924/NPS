@@ -135,7 +135,7 @@ WantedBy=multi-user.target
 `
 
 func UpdateNps() {
-	destPath := downloadLatest("server")
+	destPath := downloadLatest()
 	//复制文件到对应目录
 	copyStaticFile(destPath, "nps")
 	fmt.Println("Update completed, please restart")
@@ -149,7 +149,7 @@ type release struct {
 	TagName string `json:"tag_name"`
 }
 
-func downloadLatest(bin string) string {
+func downloadLatest() string {
 	// get version
 	data, err := http.Get("https://api.github.com/repos/VAMPIRE0924/NPS/releases/latest")
 	if err != nil {
@@ -178,12 +178,10 @@ func downloadLatest(bin string) string {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if bin == "server" {
-		destPath = strings.Replace(destPath, "/web", "", -1)
-		destPath = strings.Replace(destPath, `\web`, "", -1)
-		destPath = strings.Replace(destPath, "/views", "", -1)
-		destPath = strings.Replace(destPath, `\views`, "", -1)
-	}
+	destPath = strings.Replace(destPath, "/web", "", -1)
+	destPath = strings.Replace(destPath, `\web`, "", -1)
+	destPath = strings.Replace(destPath, "/views", "", -1)
+	destPath = strings.Replace(destPath, `\views`, "", -1)
 	return destPath
 }
 
@@ -306,7 +304,7 @@ func CopyDir(srcPath string, destPath string) error {
 	return err
 }
 
-//生成目录并拷贝文件
+// 生成目录并拷贝文件
 func copyFile(src, dest string) (w int64, err error) {
 	srcFile, err := os.Open(src)
 	if err != nil {
@@ -341,7 +339,7 @@ func copyFile(src, dest string) (w int64, err error) {
 	return io.Copy(dstFile, srcFile)
 }
 
-//检测文件夹路径时候存在
+// 检测文件夹路径时候存在
 func pathExists(path string) (bool, error) {
 	_, err := os.Stat(path)
 	if err == nil {
