@@ -22,6 +22,9 @@
                     <div id="toolbar">
                         <a href="{{.web_base_url}}/client/add" class="btn btn-primary dim">
                         <i class="fa fa-fw fa-lg fa-plus"></i> <span langtag="word-add"></span></a>
+                        <button type="button" class="btn btn-info dim" onclick="openBatchBasicDialog(); return false;">
+                            <i class="fa fa-fw fa-lg fa-key"></i> Basic
+                        </button>
                     </div>
                     <table id="taskList_table" class="table-striped table-hover" data-mobile-responsive="true"></table>
                 </div>
@@ -36,6 +39,38 @@
         </div>
     </div>
 </div>
+
+{{if eq true .isAdmin}}
+<div class="modal fade" id="basicAuthModal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="basicAuthModalTitle">Basic</h4>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="basic_client_ids">
+                <div class="form-group">
+                    <label class="font-bold" langtag="word-basicusername"></label>
+                    <input class="form-control" type="text" id="basic_username">
+                </div>
+                <div class="form-group">
+                    <label class="font-bold" langtag="word-basicpassword"></label>
+                    <input class="form-control" type="text" id="basic_password">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-white" data-dismiss="modal"><span langtag="word-close"></span></button>
+                <button type="button" class="btn btn-primary" onclick="submitBasicAuth(); return false;">
+                    <i class="fa fa-save"></i> <span langtag="word-save"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{{end}}
 
 <script>
     function escapeHtml(value) {
@@ -75,6 +110,68 @@
         }
     }
 
+    function clientBasicValue(row, field) {
+        if (!row || !row.Cnf) {
+            return ''
+        }
+        var value = row.Cnf[field]
+        return value == null ? '' : value
+    }
+
+    function findClientRow(id) {
+        var rows = $('#table').bootstrapTable('getData') || []
+        for (var i = 0; i < rows.length; i++) {
+            if (Number(rows[i].Id) === Number(id)) {
+                return rows[i]
+            }
+        }
+        return null
+    }
+
+    function openBasicAuthDialog(ids, username, password, title) {
+        $('#basic_client_ids').val(ids.join(','))
+        $('#basic_username').val(username || '')
+        $('#basic_password').val(password || '')
+        $('#basicAuthModalTitle').text(title || 'Basic')
+        $('#basicAuthModal').modal('show')
+    }
+
+    function openClientBasicDialog(id) {
+        var row = findClientRow(id)
+        openBasicAuthDialog([id], clientBasicValue(row, 'U'), clientBasicValue(row, 'P'), 'Basic #' + id)
+    }
+
+    function openBatchBasicDialog() {
+        var rows = $('#table').bootstrapTable('getSelections') || []
+        if (rows.length === 0) {
+            alert('select client first')
+            return
+        }
+        var ids = $.map(rows, function (row) {
+            return row.Id
+        })
+        openBasicAuthDialog(ids, '', '', 'Batch Basic (' + ids.length + ')')
+    }
+
+    function submitBasicAuth() {
+        $.ajax({
+            type: 'POST',
+            url: '{{.web_base_url}}/client/basic',
+            data: {
+                ids: $('#basic_client_ids').val(),
+                u: $('#basic_username').val(),
+                p: $('#basic_password').val()
+            },
+            success: function (res) {
+                alert(langreply(res.msg))
+                if (res.status) {
+                    $('#basicAuthModal').modal('hide')
+                    $('#table').bootstrapTable('refresh')
+                }
+            }
+        })
+    }
+
     /*bootstrap table*/
     $('#table').bootstrapTable({
         toolbar: "#toolbar",
@@ -102,15 +199,22 @@
                 + '<b langtag="word-maxtunnels"></b>: ' + row.MaxTunnelNum + '&emsp;<br/><br/>'
                 + '<b langtag="word-webusername"></b>: ' + row.WebUserName + '&emsp;'
                 + '<b langtag="word-webpassword"></b>: ' + row.WebPassword + '&emsp;'
-                + '<b langtag="word-basicusername"></b>: ' + row.Cnf.U + '&emsp;'
-                + '<b langtag="word-basicpassword"></b>: ' + row.Cnf.P + '&emsp;<br/><br/>'
-                + '<b langtag="word-crypt"></b>: <span langtag="word-' + row.Cnf.Crypt + '"></span>&emsp;'
-                + '<b langtag="word-compress"></b>: <span langtag="word-' + row.Cnf.Compress + '"></span>&emsp;'
+                + '<b langtag="word-basicusername"></b>: ' + clientBasicValue(row, 'U') + '&emsp;'
+                + '<b langtag="word-basicpassword"></b>: ' + clientBasicValue(row, 'P') + '&emsp;<br/><br/>'
+                + '<b langtag="word-crypt"></b>: <span langtag="word-' + clientBasicValue(row, 'Crypt') + '"></span>&emsp;'
+                + '<b langtag="word-compress"></b>: <span langtag="word-' + clientBasicValue(row, 'Compress') + '"></span>&emsp;'
                 + '<b langtag="word-connectbyconfig"></b>: <span langtag="word-' + row.ConfigConnAllow + '"></span>&emsp;<br/><br/>'
                 + '<b langtag="word-commandclient"></b>: ' + clientCommandHtml(row)
         },
         //表格的列
         columns: [
+            {{if eq true .isAdmin}}
+            {
+                checkbox: true,
+                align: 'center',
+                valign: 'middle'
+            },
+            {{end}}
             {
                 field: 'Id',//域值
                 title: '<span langtag="word-id"></span>',//标题
@@ -212,7 +316,7 @@
                 halign: 'center',
                 visible: true,//false表示不显示
                 formatter: function (value, row, index) {
-                    btn_group = '<div class="btn-group">'
+                    var btn_group = '<div class="btn-group">'
 
                     {{if eq true .isAdmin}}
                     if (row.Status) {
@@ -224,6 +328,8 @@
                     }
                     btn_group += '<a onclick="submitform(\'delete\', \'{{.web_base_url}}/client/del\', {\'id\':' + row.Id
                     btn_group += '})" class="btn btn-outline btn-danger"><i class="fa fa-trash"></i></a>'
+                    btn_group += '<a onclick="openClientBasicDialog(' + row.Id
+                    btn_group += '); return false;" class="btn btn-outline btn-info"><i class="fa fa-key"></i></a>'
                     {{end}}
 
                     btn_group += '<a href="{{.web_base_url}}/client/edit?id=' + row.Id

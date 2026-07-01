@@ -86,6 +86,8 @@ Web/API 中的 u / p                       -> 有效
 NPC 配置中的 basic_username/basic_password -> NPS 入库前清空，不采信
 ```
 
+Web 客户端列表支持单独或批量修改 Basic 认证用户名和密码；管理平台也可以调用 `/client/basic/` 接口完成同样操作。
+
 ## 构建
 
 Windows amd64:

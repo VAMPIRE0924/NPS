@@ -160,6 +160,32 @@ Web/API 中的 u / p 有效。
 NPC 配置中的 basic_username / basic_password 可以存在，但 NPS 入库前会清空，不会覆盖服务端配置。
 ```
 
+### 修改客户端 Basic 认证
+
+```text
+POST /client/basic/
+```
+
+参数：
+
+```text
+id          单个客户端 ID，和 ids 二选一
+ids         批量客户端 ID，逗号分隔，例如 1,2,3
+u           Basic 认证用户名，可留空
+p           Basic 认证密码，可留空
+timestamp
+auth_key
+```
+
+行为：
+
+```text
+1. 只允许管理员或 auth_key API 调用。
+2. 只修改客户端 Cnf.U / Cnf.P，不修改客户端 ID、备注、流量、速率、SOCKS5 等其它字段。
+3. 批量修改会先校验全部 ID；只要有一个 ID 不存在或非法，就不会写入任何客户端。
+4. 留空 u 或 p 会按空值保存，可用于统一清空 Basic 用户名或密码。
+```
+
 ### 编辑客户端
 
 ```text

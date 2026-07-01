@@ -301,3 +301,52 @@ func TestLoadTaskFromJsonFileReassignsDuplicateTaskId(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUpdateClientBasicBatch(t *testing.T) {
+	db := newTestDb(t)
+	first := newTestClient("first")
+	second := newTestClient("second")
+	legacy := newTestClient("legacy")
+	for _, client := range []*Client{first, second, legacy} {
+		if err := db.NewClient(client); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacy.Cnf = nil
+
+	count, err := db.UpdateClientBasic([]int{first.Id, second.Id, first.Id, legacy.Id}, "user", "pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("expected three unique clients updated, got %d", count)
+	}
+	for _, client := range []*Client{first, second, legacy} {
+		got, err := db.GetClient(client.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Cnf == nil || got.Cnf.U != "user" || got.Cnf.P != "pass" {
+			t.Fatalf("expected basic auth user/pass, got %#v", got.Cnf)
+		}
+	}
+
+	if _, err := db.UpdateClientBasic([]int{first.Id, 999}, "bad", "bad"); err == nil {
+		t.Fatal("expected missing client id to fail")
+	}
+	got, err := db.GetClient(first.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Cnf.U != "user" || got.Cnf.P != "pass" {
+		t.Fatal("expected failed batch not to overwrite existing client basic auth")
+	}
+
+	hidden := NewClient("hidden", true, true)
+	if err := db.NewClient(hidden); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpdateClientBasic([]int{hidden.Id}, "hidden", "hidden"); err == nil {
+		t.Fatal("expected hidden internal client id to fail")
+	}
+}

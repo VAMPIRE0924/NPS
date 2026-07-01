@@ -498,6 +498,44 @@ func (s *DbUtils) UpdateClient(t *Client) error {
 	return nil
 }
 
+func (s *DbUtils) UpdateClientBasic(ids []int, username, password string) (int, error) {
+	if len(ids) == 0 {
+		return 0, errors.New("client id is empty")
+	}
+	s.JsonDb.idLock.Lock()
+	defer s.JsonDb.idLock.Unlock()
+	seen := make(map[int]struct{}, len(ids))
+	clients := make([]*Client, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			return 0, errors.New("client id is invalid")
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		value, ok := s.JsonDb.Clients.Load(id)
+		if !ok {
+			return 0, errors.New("client not found")
+		}
+		client := value.(*Client)
+		if client.NoDisplay {
+			return 0, errors.New("client not found")
+		}
+		seen[id] = struct{}{}
+		clients = append(clients, client)
+	}
+	for _, client := range clients {
+		if client.Cnf == nil {
+			client.Cnf = new(Config)
+		}
+		client.Cnf.U = username
+		client.Cnf.P = password
+		s.JsonDb.Clients.Store(client.Id, client)
+	}
+	s.JsonDb.StoreClientsToJsonFile()
+	return len(clients), nil
+}
+
 func (s *DbUtils) IsPubClient(id int) bool {
 	client, err := s.GetClient(id)
 	if err == nil {
