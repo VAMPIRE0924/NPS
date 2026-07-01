@@ -1,0 +1,13 @@
+.idea
+.vscode/
+nps
+npc
+nps.exe
+npc.exe
+*.test
+*.log
+coverage.out
+dist/
+build/
+release/
+workspace/
