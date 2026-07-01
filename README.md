@@ -130,7 +130,3 @@ go vet ./bridge ./cmd/nps ./lib/cache ./lib/common ./lib/conn ./lib/crypt ./lib/
 ```
 
 `go test ./...` 仍可能命中上游/环境测试问题，例如 GUI NPC 的 OpenGL/Fyne 环境、`lib/pmux` 测试占用固定端口、旧 `lib/config` 测试夹具。这些不属于 NPS 服务端重构主链路。
-
-## 许可证与来源
-
-本项目基于 NPS 源码重构。为保持开源许可证合规，仓库保留原许可证文件 `LICENSE`。本 README 和 API 文档已针对本重构版重新编写。
