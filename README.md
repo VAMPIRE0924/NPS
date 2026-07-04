@@ -1,6 +1,6 @@
 # NPS
 
-本仓库基于[NPS](https://github.com/ehang-io/nps)优化，并保持兼容旧版NPC，API接口和web发生了细微变化。
+本仓库基于[NPS](https://github.com/ehang-io/nps)优化，兼容旧版NPC，API接口和web发生了细微变化。
 
 ## 功能特性
 
