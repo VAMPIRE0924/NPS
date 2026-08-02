@@ -12,6 +12,51 @@ type IndexController struct {
 	BaseController
 }
 
+func cloneTunnelForUpdate(t *file.Tunnel) *file.Tunnel {
+	if t == nil {
+		return nil
+	}
+	t.RLock()
+	defer t.RUnlock()
+	clone := &file.Tunnel{
+		Id:           t.Id,
+		Port:         t.Port,
+		ServerIp:     t.ServerIp,
+		Mode:         t.Mode,
+		Status:       t.Status,
+		RunStatus:    t.RunStatus,
+		Client:       t.Client,
+		Ports:        t.Ports,
+		Flow:         t.Flow,
+		Password:     t.Password,
+		Remark:       t.Remark,
+		TargetAddr:   t.TargetAddr,
+		NoStore:      t.NoStore,
+		LocalPath:    t.LocalPath,
+		StripPre:     t.StripPre,
+		MultiAccount: t.MultiAccount,
+		Health: file.Health{
+			HealthCheckTimeout:  t.HealthCheckTimeout,
+			HealthMaxFail:       t.HealthMaxFail,
+			HealthCheckInterval: t.HealthCheckInterval,
+			HealthNextTime:      t.HealthNextTime,
+			HealthMap:           t.HealthMap,
+			HttpHealthUrl:       t.HttpHealthUrl,
+			HealthRemoveArr:     append([]string(nil), t.HealthRemoveArr...),
+			HealthCheckType:     t.HealthCheckType,
+			HealthCheckTarget:   t.HealthCheckTarget,
+		},
+	}
+	if t.Target != nil {
+		clone.Target = &file.Target{
+			TargetStr:  t.Target.TargetStr,
+			TargetArr:  append([]string(nil), t.Target.TargetArr...),
+			LocalProxy: t.Target.LocalProxy,
+		}
+	}
+	return clone
+}
+
 func (s *IndexController) Index() {
 	s.Data["web_base_url"] = beego.AppConfig.String("web_base_url")
 	s.Data["data"] = server.GetDashboardData()
@@ -168,11 +213,12 @@ func (s *IndexController) Edit() {
 		if oldMode == file.TaskModeSocks || s.getTaskMode() == file.TaskModeSocks {
 			s.AjaxErr("socks5 task is managed by client and cannot be modified")
 		}
-		if t, err := file.GetDb().ResolveTask(oldMode, id); err != nil {
+		if current, err := file.GetDb().ResolveTask(oldMode, id); err != nil {
 			s.error()
 			return
 		} else {
-			oldTaskMode, oldTaskId := t.Mode, t.Id
+			oldTaskMode, oldTaskId := current.Mode, current.Id
+			t := cloneTunnelForUpdate(current)
 			if client, err := file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
 				s.AjaxErr("modified error,the client is not exist")
 				return
@@ -199,10 +245,13 @@ func (s *IndexController) Edit() {
 			t.StripPre = s.getEscapeString("strip_pre")
 			t.Remark = s.getEscapeString("remark")
 			t.Target.LocalProxy = s.GetBoolNoErr("local_proxy")
-			if err := file.GetDb().UpdateTaskByModeId(oldTaskMode, oldTaskId, t); err != nil {
+			if err := server.StopServerByMode(oldTaskMode, oldTaskId); err != nil {
 				s.AjaxErr(err.Error())
 			}
-			_ = server.StopServerByMode(oldTaskMode, oldTaskId)
+			if err := file.GetDb().UpdateTaskByModeId(oldTaskMode, oldTaskId, t); err != nil {
+				_ = server.StartTaskByMode(oldTaskMode, oldTaskId)
+				s.AjaxErr(err.Error())
+			}
 			if err := server.StartTaskByMode(t.Mode, t.Id); err != nil {
 				s.AjaxErr(err.Error())
 			}
