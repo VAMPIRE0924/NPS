@@ -4,9 +4,10 @@
 
 版本边界：
 
-- 生产基线 `v0.2.2` 已使用本文的 HMAC-SHA256 鉴权和复合任务 ID。
-- `POST /index/socksstatus/` 是当前开发版新增接口，尚未发布到生产 `v0.2.2`。
-- 测试通过并重新发布后，才可在生产适配中启用该新增接口。
+- 当前生产 `v0.2.2` 已使用 HMAC-SHA256、复合任务 ID 和
+  `POST /index/socksstatus/`。
+- 2026-08-17 生产验收发现已发布构建在 Beego 解析表单后误按空正文验签。
+  本次 `v0.2.2` 覆盖发布已修复为按实际发送的原始正文字节验签。
 
 ## 1. 基础约定
 
@@ -51,6 +52,8 @@ Content-Type: application/x-www-form-urlencoded
 
 适配层必须同时判断 HTTP 状态码和 JSON 中的 `status` 或 `code`。多数业务错误仍返回
 HTTP 200；鉴权失败返回 HTTP 401，方法错误返回 HTTP 405。
+未建立 Web 会话且未携带完整 HMAC 请求头的受保护 POST 也返回 HTTP 401，
+不跳转登录页。
 
 ## 2. API 鉴权
 
