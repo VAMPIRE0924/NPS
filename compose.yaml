@@ -1,0 +1,8 @@
+services:
+  nps:
+    image: vampirerune/nps:main
+    container_name: nps
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./conf:/nps/conf
