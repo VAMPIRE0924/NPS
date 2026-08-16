@@ -1,0 +1,139 @@
+name: Publish NPS Docker image
+
+on:
+  push:
+    branches: [dev]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git ref to build, for example dev or v0.2.1
+        required: true
+        type: string
+      channel:
+        description: Docker tag channel
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - release
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-publish-${{ github.ref }}-${{ inputs.channel || github.ref_type }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
+
+jobs:
+  verify:
+    name: Verify NPS before image publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || inputs.tag }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Require release tags to point to main
+        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' || inputs.channel == 'release' }}
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.26.6
+          cache: true
+
+      - name: Test NPS packages
+        run: >-
+          go test
+          ./bridge ./client ./cmd/nps ./lib/cache ./lib/common ./lib/conn
+          ./lib/crypt ./lib/daemon ./lib/file ./lib/goroutine ./lib/install
+          ./lib/rate ./lib/sheap ./lib/version ./server ./server/connection
+          ./server/proxy ./server/test ./server/tool ./web/controllers ./web/routers
+
+      - name: Vet NPS packages
+        run: >-
+          go vet
+          ./bridge ./cmd/nps ./lib/cache ./lib/common ./lib/conn
+          ./lib/crypt ./lib/daemon ./lib/file ./lib/goroutine ./lib/install
+          ./lib/rate ./lib/sheap ./lib/version ./server ./server/connection
+          ./server/proxy ./server/test ./server/tool ./web/controllers ./web/routers
+
+      - name: Scan reachable vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./bridge ./cmd/nps ./lib/... ./server/... ./web/...
+
+  publish:
+    name: Publish Docker Hub image
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || inputs.tag }}
+          persist-credentials: false
+
+      - name: Resolve image tags
+        id: release
+        env:
+          CHANNEL: ${{ github.event_name == 'push' && github.ref_type == 'branch' && 'dev' || github.event_name == 'push' && github.ref_type == 'tag' && 'release' || inputs.channel }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+        run: |
+          set -eu
+          if [ -z "$DOCKERHUB_USERNAME" ]; then
+            echo "Repository variable DOCKERHUB_USERNAME is required." >&2
+            exit 1
+          fi
+          repository="${DOCKERHUB_REPOSITORY:-nps}"
+          image="${DOCKERHUB_USERNAME}/${repository}"
+          if [ "$CHANNEL" = "dev" ]; then
+            tags="${image}:dev"
+          else
+            version="${RELEASE_TAG#v}"
+            case "$version" in
+              *[!0-9A-Za-z._-]*|'')
+                echo "Invalid release tag: $RELEASE_TAG" >&2
+                exit 1
+                ;;
+            esac
+            tags="${image}:${version},${image}:latest"
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build and push multi-platform image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile.nps
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.release.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=nps
+          cache-to: type=gha,mode=max,scope=nps
+          provenance: mode=max
+          sbom: true
