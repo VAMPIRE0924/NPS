@@ -35,6 +35,9 @@ func (s *BaseController) Prepare() {
 	} else if s.GetString("auth_key") != "" || s.GetString("timestamp") != "" {
 		s.rejectUnauthorized("legacy MD5 API authentication is no longer supported")
 	} else if s.GetSession("auth") != true {
+		if unauthenticatedRequestRequiresAPIAuth(s.Ctx.Request) {
+			s.rejectUnauthorized("API authentication required")
+		}
 		s.Redirect(beego.AppConfig.String("web_base_url")+"/login/index", 302)
 	}
 	if !s.apiAuthenticated && s.GetSession("isAdmin") != nil && !s.GetSession("isAdmin").(bool) {
@@ -57,6 +60,10 @@ func (s *BaseController) Prepare() {
 	s.Data["allow_tunnel_num_limit"], _ = beego.AppConfig.Bool("allow_tunnel_num_limit")
 	s.Data["allow_local_proxy"], _ = beego.AppConfig.Bool("allow_local_proxy")
 	s.Data["allow_user_change_username"], _ = beego.AppConfig.Bool("allow_user_change_username")
+}
+
+func unauthenticatedRequestRequiresAPIAuth(r *http.Request) bool {
+	return r != nil && r.Method == http.MethodPost
 }
 
 func (s *BaseController) rejectUnauthorized(message string) {

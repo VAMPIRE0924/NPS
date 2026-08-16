@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	beecontext "github.com/astaxie/beego/context"
 )
 
 const (
@@ -29,6 +32,26 @@ type apiAuthenticator struct {
 }
 
 var requestAPIAuthenticator = &apiAuthenticator{nonces: make(map[string]time.Time)}
+
+type apiRequestBodyContextKey struct{}
+
+type apiRequestBodyCapture struct {
+	body []byte
+	err  error
+}
+
+// CaptureAPIRequestBody runs before Beego parses form data. Beego consumes the
+// request body before controller Prepare, so HMAC verification must retain the
+// exact encoded bytes at this earlier stage.
+func CaptureAPIRequestBody(ctx *beecontext.Context) {
+	if ctx == nil || ctx.Request == nil || !hasAPIAuthHeaders(ctx.Request) {
+		return
+	}
+	body, err := readAndRestoreRequestBody(ctx.Request)
+	capture := apiRequestBodyCapture{body: body, err: err}
+	requestContext := context.WithValue(ctx.Request.Context(), apiRequestBodyContextKey{}, capture)
+	ctx.Request = ctx.Request.WithContext(requestContext)
+}
 
 func hasAPIAuthHeaders(r *http.Request) bool {
 	return r.Header.Get(apiTimestampHeader) != "" ||
@@ -63,9 +86,18 @@ func (a *apiAuthenticator) verify(r *http.Request, secret string, now time.Time)
 			return errors.New("invalid API nonce")
 		}
 	}
-	body, err := readAndRestoreRequestBody(r)
-	if err != nil {
-		return err
+	var body []byte
+	if capture, ok := r.Context().Value(apiRequestBodyContextKey{}).(apiRequestBodyCapture); ok {
+		if capture.err != nil {
+			return capture.err
+		}
+		body = capture.body
+	} else {
+		var err error
+		body, err = readAndRestoreRequestBody(r)
+		if err != nil {
+			return err
+		}
 	}
 	expected := apiRequestSignature(r, timestampText, nonce, body, secret)
 	provided, err := hex.DecodeString(signatureText)
