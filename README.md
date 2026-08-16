@@ -143,6 +143,24 @@ web/
 /nps/conf/     配置和持久化数据卷
 ```
 
+镜像标签：
+
+| 标签 | 用途 |
+| --- | --- |
+| `main` | 通过验收并合入受保护 `main` 分支的最新稳定构建 |
+| `<VERSION>` | 固定正式版本，例如 `0.2.1`，生产环境推荐使用 |
+| `dev` | `dev` 分支测试构建，不建议生产使用 |
+
+首次启动前先下载公开配置模板，并将占位管理密码替换为至少 12 位的唯一强密码：
+
+```bash
+mkdir -p ./conf
+curl -fsSL \
+  https://raw.githubusercontent.com/VAMPIRE0924/NPS/main/conf/nps.conf \
+  -o ./conf/nps.conf
+chmod 600 ./conf/nps.conf
+```
+
 示例：
 
 ```bash
@@ -156,6 +174,17 @@ docker run -d \
 
 Linux 使用 `--network host` 时无需逐个映射动态隧道端口。使用 bridge 网络时，需要映射
 Bridge、Web、HTTP/HTTPS 代理端口以及所有隧道端口。
+
+也可直接使用仓库中的 `compose.yaml`：
+
+```bash
+docker compose up -d
+docker compose logs -f nps
+```
+
+生产环境建议固定版本号而不是跟随 `main`。升级前备份 `conf/`，再执行
+`docker compose pull && docker compose up -d`。更完整的 Docker 部署说明见
+[DOCKERHUB.md](DOCKERHUB.md)。
 
 自动化分支与发布规则：
 
