@@ -124,6 +124,13 @@ func (s *BaseController) getTaskMode() string {
 	return file.CanonicalTaskMode(s.getEscapeString("mode"))
 }
 
+func authorizationTaskMode(actionName, requestedMode string) string {
+	if actionName == "socksstatus" {
+		return file.TaskModeSocks
+	}
+	return requestedMode
+}
+
 // 去掉没有err返回值的int
 func (s *BaseController) GetIntNoErr(key string, def ...int) int {
 	strv := s.Ctx.Input.Query(key)
@@ -219,7 +226,8 @@ func (s *BaseController) CheckUserAuth() {
 					}
 				}
 			} else {
-				if v, err := file.GetDb().ResolveTask(s.getTaskMode(), id); err == nil {
+				mode := authorizationTaskMode(s.actionName, s.getTaskMode())
+				if v, err := file.GetDb().ResolveTask(mode, id); err == nil {
 					if v.Client.Id == s.GetSession("clientId").(int) {
 						belong = true
 					}

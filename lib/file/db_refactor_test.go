@@ -220,6 +220,33 @@ func TestPortForwardTaskPoolReusesSmallestAndAcceptsNpcTcpUdpModes(t *testing.T)
 	}
 }
 
+func TestTaskOperationsRequireMode(t *testing.T) {
+	db := newTestDb(t)
+	client := newTestClient("client")
+	if err := db.NewClient(client); err != nil {
+		t.Fatal(err)
+	}
+	task := newTestTask(TaskModePortForward, client)
+	if err := db.NewTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.GetTaskByMode("", task.Id); err == nil {
+		t.Fatal("task lookup without mode must be rejected")
+	}
+	if err := db.SetTaskStatusByMode("", task.Id, false); err == nil {
+		t.Fatal("task status update without mode must be rejected")
+	}
+	if err := db.DelTaskByMode("", task.Id); err == nil {
+		t.Fatal("task deletion without mode must be rejected")
+	}
+	updated := newTestTask(TaskModePortForward, client)
+	updated.Id = task.Id
+	if err := db.UpdateTaskByModeId("", task.Id, updated); err == nil {
+		t.Fatal("task update without old mode must be rejected")
+	}
+}
+
 func TestHostIdReuseSmallestAvailable(t *testing.T) {
 	db := newTestDb(t)
 	client := newTestClient("client")
@@ -348,5 +375,39 @@ func TestUpdateClientBasicBatch(t *testing.T) {
 	}
 	if _, err := db.UpdateClientBasic([]int{hidden.Id}, "hidden", "hidden"); err == nil {
 		t.Fatal("expected hidden internal client id to fail")
+	}
+}
+
+func TestUpdateClientKeepsExistingRateRuntime(t *testing.T) {
+	db := newTestDb(t)
+	client := newTestClient("client")
+	if err := db.NewClient(client); err != nil {
+		t.Fatal(err)
+	}
+	existingRate := client.Rate
+	client.Remark = "updated"
+	if err := db.UpdateClient(client); err != nil {
+		t.Fatal(err)
+	}
+	if client.Rate != existingRate {
+		t.Fatal("client update must not leak a replacement rate goroutine")
+	}
+}
+
+func TestPersistentFilesAreOwnerOnly(t *testing.T) {
+	db := newTestDb(t)
+	client := newTestClient("private")
+	client.VerifyKey = "must-not-be-world-readable"
+	if err := db.NewClient(client); err != nil {
+		t.Fatal(err)
+	}
+	db.JsonDb.StoreClientsToJsonFile()
+
+	info, err := os.Stat(db.JsonDb.ClientFilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("expected owner-only client database mode 0600, got %04o", got)
 	}
 }

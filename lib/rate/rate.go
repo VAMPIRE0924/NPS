@@ -1,6 +1,7 @@
 package rate
 
 import (
+	"encoding/json"
 	"sync/atomic"
 	"time"
 )
@@ -27,37 +28,56 @@ func (s *Rate) Start() {
 }
 
 func (s *Rate) add(size int64) {
-	if res := s.bucketSize - s.bucketSurplusSize; res < s.bucketAddSize {
-		atomic.AddInt64(&s.bucketSurplusSize, res)
-		return
+	for {
+		current := atomic.LoadInt64(&s.bucketSurplusSize)
+		available := s.bucketSize - current
+		if available <= 0 {
+			return
+		}
+		addSize := size
+		if addSize > available {
+			addSize = available
+		}
+		if atomic.CompareAndSwapInt64(&s.bucketSurplusSize, current, current+addSize) {
+			return
+		}
 	}
-	atomic.AddInt64(&s.bucketSurplusSize, size)
 }
 
-//回桶
+// 回桶
 func (s *Rate) ReturnBucket(size int64) {
 	s.add(size)
 }
 
-//停止
+// 停止
 func (s *Rate) Stop() {
 	s.stopChan <- true
 }
 
 func (s *Rate) Get(size int64) {
-	if s.bucketSurplusSize >= size {
-		atomic.AddInt64(&s.bucketSurplusSize, -size)
+	if s.take(size) {
 		return
 	}
 	ticker := time.NewTicker(time.Millisecond * 100)
 	for {
 		select {
 		case <-ticker.C:
-			if s.bucketSurplusSize >= size {
-				atomic.AddInt64(&s.bucketSurplusSize, -size)
+			if s.take(size) {
 				ticker.Stop()
 				return
 			}
+		}
+	}
+}
+
+func (s *Rate) take(size int64) bool {
+	for {
+		current := atomic.LoadInt64(&s.bucketSurplusSize)
+		if current < size {
+			return false
+		}
+		if atomic.CompareAndSwapInt64(&s.bucketSurplusSize, current, current-size) {
+			return true
 		}
 	}
 }
@@ -67,10 +87,11 @@ func (s *Rate) session() {
 	for {
 		select {
 		case <-ticker.C:
-			if rs := s.bucketAddSize - s.bucketSurplusSize; rs > 0 {
-				s.NowRate = rs
+			current := atomic.LoadInt64(&s.bucketSurplusSize)
+			if rs := s.bucketAddSize - current; rs > 0 {
+				atomic.StoreInt64(&s.NowRate, rs)
 			} else {
-				s.NowRate = s.bucketSize - s.bucketSurplusSize
+				atomic.StoreInt64(&s.NowRate, s.bucketSize-current)
 			}
 			s.add(s.bucketAddSize)
 		case <-s.stopChan:
@@ -78,4 +99,10 @@ func (s *Rate) session() {
 			return
 		}
 	}
+}
+
+func (s *Rate) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		NowRate int64
+	}{NowRate: atomic.LoadInt64(&s.NowRate)})
 }

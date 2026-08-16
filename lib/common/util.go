@@ -2,6 +2,7 @@ package common
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"ehang.io/nps/lib/version"
 	"encoding/base64"
 	"encoding/binary"
@@ -68,7 +69,11 @@ func CheckAuth(r *http.Request, user, passwd string) bool {
 	if len(pair) != 2 {
 		return false
 	}
-	return pair[0] == user && pair[1] == passwd
+	return ConstantTimeEqual(pair[0], user) && ConstantTimeEqual(pair[1], passwd)
+}
+
+func ConstantTimeEqual(left, right string) bool {
+	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
 }
 
 // get bool by str
@@ -176,18 +181,22 @@ func TestUdpPort(port int) bool {
 // # Characters are used to separate data
 func BinaryWrite(raw *bytes.Buffer, v ...string) {
 	b := GetWriteStr(v...)
-	binary.Write(raw, binary.LittleEndian, int32(len(b)))
-	binary.Write(raw, binary.LittleEndian, b)
+	if uint64(len(b)) > uint64(^uint32(0)>>1) {
+		return
+	}
+	var length [4]byte
+	// #nosec G115 -- the explicit maximum check above guarantees this conversion.
+	binary.LittleEndian.PutUint32(length[:], uint32(len(b)))
+	_, _ = raw.Write(length[:])
+	_, _ = raw.Write(b)
 }
 
 // get seq str
 func GetWriteStr(v ...string) []byte {
 	buffer := new(bytes.Buffer)
-	var l int32
 	for _, v := range v {
-		l += int32(len([]byte(v))) + int32(len([]byte(CONN_DATA_SEQ)))
-		binary.Write(buffer, binary.LittleEndian, []byte(v))
-		binary.Write(buffer, binary.LittleEndian, []byte(CONN_DATA_SEQ))
+		_, _ = buffer.WriteString(v)
+		_, _ = buffer.WriteString(CONN_DATA_SEQ)
 	}
 	return buffer.Bytes()
 }

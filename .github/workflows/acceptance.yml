@@ -27,17 +27,23 @@ jobs:
       - name: Test NPS packages
         run: >-
           go test
-          ./bridge ./client ./cmd/nps ./lib/cache ./lib/common ./lib/conn
+          ./bridge ./client ./cmd/nps ./lib/cache ./lib/common ./lib/config ./lib/conn
           ./lib/crypt ./lib/daemon ./lib/file ./lib/goroutine ./lib/install
-          ./lib/rate ./lib/sheap ./lib/version ./server ./server/connection
+          ./lib/pmux ./lib/rate ./lib/sheap ./lib/version ./server ./server/connection
           ./server/proxy ./server/test ./server/tool ./web/controllers ./web/routers
+
+      - name: Race-test shared runtime state
+        run: >-
+          go test -race
+          ./lib/file ./lib/pmux ./lib/rate
+          ./server ./server/proxy ./web/controllers
 
       - name: Vet NPS packages
         run: >-
           go vet
-          ./bridge ./cmd/nps ./lib/cache ./lib/common ./lib/conn
+          ./bridge ./cmd/nps ./lib/cache ./lib/common ./lib/config ./lib/conn
           ./lib/crypt ./lib/daemon ./lib/file ./lib/goroutine ./lib/install
-          ./lib/rate ./lib/sheap ./lib/version ./server ./server/connection
+          ./lib/pmux ./lib/rate ./lib/sheap ./lib/version ./server ./server/connection
           ./server/proxy ./server/test ./server/tool ./web/controllers ./web/routers
 
       - name: Scan reachable vulnerabilities

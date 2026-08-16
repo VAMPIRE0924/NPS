@@ -7,9 +7,9 @@ import (
 	"bytes"
 	"io"
 	"net"
-	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"ehang.io/nps/lib/common"
@@ -27,18 +27,20 @@ const (
 	HTTP_OPTIONS    = 798084
 	HTTP_TRACE      = 848265
 	CLIENT          = 848384
-	ACCEPT_TIME_OUT = 10
+	ACCEPT_TIME_OUT = 10 * time.Second
 )
 
 type PortMux struct {
 	net.Listener
 	port        int
-	isClose     bool
 	managerHost string
 	clientConn  chan *PortConn
 	httpConn    chan *PortConn
 	httpsConn   chan *PortConn
 	managerConn chan *PortConn
+	startMu     sync.Mutex
+	closeOnce   sync.Once
+	done        chan struct{}
 }
 
 func NewPortMux(port int, managerHost string) *PortMux {
@@ -49,12 +51,22 @@ func NewPortMux(port int, managerHost string) *PortMux {
 		httpConn:    make(chan *PortConn),
 		httpsConn:   make(chan *PortConn),
 		managerConn: make(chan *PortConn),
+		done:        make(chan struct{}),
 	}
-	pMux.Start()
 	return pMux
 }
 
 func (pMux *PortMux) Start() error {
+	pMux.startMu.Lock()
+	defer pMux.startMu.Unlock()
+	if pMux.Listener != nil {
+		return errors.New("the port pmux has already started")
+	}
+	select {
+	case <-pMux.done:
+		return errors.New("the port pmux has closed")
+	default:
+	}
 	// Port multiplexing is based on TCP only
 	tcpAddr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:"+strconv.Itoa(pMux.port))
 	if err != nil {
@@ -62,16 +74,19 @@ func (pMux *PortMux) Start() error {
 	}
 	pMux.Listener, err = net.ListenTCP("tcp", tcpAddr)
 	if err != nil {
-		logs.Error(err)
-		os.Exit(0)
+		return err
 	}
 	go func() {
 		for {
 			conn, err := pMux.Listener.Accept()
 			if err != nil {
-				logs.Warn(err)
-				//close
-				pMux.Close()
+				select {
+				case <-pMux.done:
+					return
+				default:
+					logs.Warn(err)
+					return
+				}
 			}
 			go pMux.process(conn)
 		}
@@ -80,10 +95,15 @@ func (pMux *PortMux) Start() error {
 }
 
 func (pMux *PortMux) process(conn net.Conn) {
+	if conn == nil {
+		return
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(ACCEPT_TIME_OUT))
 	// Recognition according to different signs
 	// read 3 byte
 	buf := make([]byte, 3)
 	if n, err := io.ReadFull(conn, buf); err != nil || n != 3 {
+		_ = conn.Close()
 		return
 	}
 	var ch chan *PortConn
@@ -104,6 +124,10 @@ func (pMux *PortMux) process(conn net.Conn) {
 			}
 			buffer.Write(b)
 			buffer.Write([]byte("\r\n"))
+			if buffer.Len() > 32<<10 {
+				_ = conn.Close()
+				return
+			}
 			if strings.Index(string(b), "Host:") == 0 || strings.Index(string(b), "host:") == 0 {
 				// Remove host and space effects
 				str := strings.Replace(string(b), "Host:", "", -1)
@@ -130,37 +154,41 @@ func (pMux *PortMux) process(conn net.Conn) {
 	if len(rs) == 0 {
 		rs = buf
 	}
+	_ = conn.SetReadDeadline(time.Time{})
 	timer := time.NewTimer(ACCEPT_TIME_OUT)
+	defer timer.Stop()
 	select {
 	case <-timer.C:
+		_ = conn.Close()
+	case <-pMux.done:
+		_ = conn.Close()
 	case ch <- newPortConn(conn, rs, readMore):
 	}
 }
 
 func (pMux *PortMux) Close() error {
-	if pMux.isClose {
-		return errors.New("the port pmux has closed")
-	}
-	pMux.isClose = true
-	close(pMux.clientConn)
-	close(pMux.httpsConn)
-	close(pMux.httpConn)
-	close(pMux.managerConn)
-	return pMux.Listener.Close()
+	var closeErr error
+	pMux.closeOnce.Do(func() {
+		close(pMux.done)
+		if pMux.Listener != nil {
+			closeErr = pMux.Listener.Close()
+		}
+	})
+	return closeErr
 }
 
 func (pMux *PortMux) GetClientListener() net.Listener {
-	return NewPortListener(pMux.clientConn, pMux.Listener.Addr())
+	return NewPortListener(pMux.clientConn, pMux.Listener.Addr(), pMux.done)
 }
 
 func (pMux *PortMux) GetHttpListener() net.Listener {
-	return NewPortListener(pMux.httpConn, pMux.Listener.Addr())
+	return NewPortListener(pMux.httpConn, pMux.Listener.Addr(), pMux.done)
 }
 
 func (pMux *PortMux) GetHttpsListener() net.Listener {
-	return NewPortListener(pMux.httpsConn, pMux.Listener.Addr())
+	return NewPortListener(pMux.httpsConn, pMux.Listener.Addr(), pMux.done)
 }
 
 func (pMux *PortMux) GetManagerListener() net.Listener {
-	return NewPortListener(pMux.managerConn, pMux.Listener.Addr())
+	return NewPortListener(pMux.managerConn, pMux.Listener.Addr(), pMux.done)
 }

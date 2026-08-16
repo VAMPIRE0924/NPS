@@ -29,25 +29,156 @@ var (
 	flowSessionOnce sync.Once
 )
 
-const managedSocksIdleTimeout = 30 * time.Minute
+const (
+	managedSocksIdleTimeout    = 30 * time.Minute
+	managedSocksActivityWindow = time.Minute
+)
 
 type socksIdleState struct {
+	mu         sync.Mutex
 	inletFlow  int64
 	exportFlow int64
 	lastActive time.Time
+	flowActive bool
 }
 
 func (s *socksIdleState) shouldClose(inletFlow, exportFlow int64, now time.Time, timeout time.Duration) bool {
 	if timeout <= 0 {
 		return false
 	}
-	if s.lastActive.IsZero() || s.inletFlow != inletFlow || s.exportFlow != exportFlow {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastActive.IsZero() {
 		s.inletFlow = inletFlow
 		s.exportFlow = exportFlow
 		s.lastActive = now
 		return false
 	}
+	if s.inletFlow != inletFlow || s.exportFlow != exportFlow {
+		s.inletFlow = inletFlow
+		s.exportFlow = exportFlow
+		s.lastActive = now
+		s.flowActive = true
+		return false
+	}
 	return !now.Before(s.lastActive.Add(timeout))
+}
+
+type socksActivitySnapshot struct {
+	active     bool
+	lastActive time.Time
+	idle       time.Duration
+	remaining  time.Duration
+}
+
+func (s *socksIdleState) activity(inletFlow, exportFlow int64, now time.Time, timeout time.Duration) socksActivitySnapshot {
+	if timeout <= 0 {
+		return socksActivitySnapshot{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.lastActive.IsZero() || s.inletFlow != inletFlow || s.exportFlow != exportFlow {
+		return socksActivitySnapshot{
+			active:     true,
+			lastActive: now,
+			remaining:  timeout,
+		}
+	}
+	idle := now.Sub(s.lastActive)
+	if idle < 0 {
+		idle = 0
+	}
+	remaining := timeout - idle
+	if remaining < 0 {
+		remaining = 0
+	}
+	return socksActivitySnapshot{
+		active:     s.flowActive && idle < managedSocksActivityWindow,
+		lastActive: s.lastActive,
+		idle:       idle,
+		remaining:  remaining,
+	}
+}
+
+// ManagedSocksActivity describes the runtime and idle-close state of a managed
+// SOCKS tunnel. Active means its cumulative flow has changed since the latest
+// idle tracker sample; querying this value does not reset the idle timer.
+type ManagedSocksActivity struct {
+	ID                      int   `json:"id"`
+	ClientID                int   `json:"client_id"`
+	Enabled                 bool  `json:"enabled"`
+	Running                 bool  `json:"running"`
+	Active                  bool  `json:"active"`
+	Countdown               bool  `json:"countdown"`
+	LastActiveAt            int64 `json:"last_active_at"`
+	IdleSeconds             int64 `json:"idle_seconds"`
+	RemainingSeconds        int64 `json:"remaining_seconds"`
+	AutoCloseAt             int64 `json:"auto_close_at"`
+	AutoCloseTimeoutSeconds int64 `json:"auto_close_timeout_seconds"`
+	InletFlow               int64 `json:"inlet_flow"`
+	ExportFlow              int64 `json:"export_flow"`
+}
+
+func durationSecondsCeil(value time.Duration) int64 {
+	if value <= 0 {
+		return 0
+	}
+	return int64((value + time.Second - 1) / time.Second)
+}
+
+// GetManagedSocksActivity returns status for the managed SOCKS tunnel whose ID
+// is the same as its client ID.
+func GetManagedSocksActivity(id int, now time.Time) (*ManagedSocksActivity, error) {
+	return getManagedSocksActivity(file.GetDb(), id, now)
+}
+
+func getManagedSocksActivity(db *file.DbUtils, id int, now time.Time) (*ManagedSocksActivity, error) {
+	t, err := db.GetTaskByMode(file.TaskModeSocks, id)
+	if err != nil {
+		return nil, err
+	}
+	t.RLock()
+	enabled := t.Status
+	clientID := 0
+	if t.Client != nil {
+		clientID = t.Client.Id
+	}
+	flow := t.Flow
+	t.RUnlock()
+
+	inletFlow, exportFlow := flow.Snapshot()
+	result := &ManagedSocksActivity{
+		ID:                      t.Id,
+		ClientID:                clientID,
+		Enabled:                 enabled,
+		AutoCloseTimeoutSeconds: int64(managedSocksIdleTimeout / time.Second),
+		InletFlow:               inletFlow,
+		ExportFlow:              exportFlow,
+	}
+	taskKey := file.TaskMapKey(t)
+	if _, result.Running = RunList.Load(taskKey); !result.Running {
+		return result, nil
+	}
+
+	stateValue, _ := socksIdleStates.LoadOrStore(taskKey, &socksIdleState{
+		inletFlow:  inletFlow,
+		exportFlow: exportFlow,
+		lastActive: now,
+	})
+	if _, ok := RunList.Load(taskKey); !ok {
+		socksIdleStates.CompareAndDelete(taskKey, stateValue)
+		result.Running = false
+		return result, nil
+	}
+	snapshot := stateValue.(*socksIdleState).activity(inletFlow, exportFlow, now, managedSocksIdleTimeout)
+	result.Active = snapshot.active
+	result.Countdown = !snapshot.active
+	result.LastActiveAt = snapshot.lastActive.Unix()
+	result.IdleSeconds = int64(snapshot.idle / time.Second)
+	result.RemainingSeconds = durationSecondsCeil(snapshot.remaining)
+	result.AutoCloseAt = now.Add(snapshot.remaining).Unix()
+	return result, nil
 }
 
 var socksIdleStates sync.Map
@@ -372,16 +503,24 @@ func GetTunnel(start, length int, typeVal string, clientId int, search string) (
 			}
 			cnt++
 			if _, ok := Bridge.Client.Load(v.Client.Id); ok {
+				v.Client.Lock()
 				v.Client.IsConnect = true
+				v.Client.Unlock()
 			} else {
+				v.Client.Lock()
 				v.Client.IsConnect = false
+				v.Client.Unlock()
 			}
 			if start--; start < 0 {
 				if length--; length >= 0 {
 					if _, ok := RunList.Load(file.TaskMapKey(v)); ok {
+						v.Lock()
 						v.RunStatus = true
+						v.Unlock()
 					} else {
+						v.Lock()
 						v.RunStatus = false
+						v.Unlock()
 					}
 					list = append(list, v)
 				}
@@ -402,29 +541,35 @@ func dealClientData() {
 	file.GetDb().JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*file.Client)
 		if vv, ok := Bridge.Client.Load(v.Id); ok {
+			v.Lock()
 			v.IsConnect = true
 			v.Version = vv.(*bridge.Client).Version
+			v.Unlock()
 		} else {
+			v.Lock()
 			v.IsConnect = false
+			v.Unlock()
 		}
-		v.Flow.InletFlow = 0
-		v.Flow.ExportFlow = 0
+		var inletFlow, exportFlow int64
 		file.GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
 			h := value.(*file.Host)
 			if h.Client.Id == v.Id {
-				v.Flow.InletFlow += h.Flow.InletFlow
-				v.Flow.ExportFlow += h.Flow.ExportFlow
+				in, out := h.Flow.Snapshot()
+				inletFlow += in
+				exportFlow += out
 			}
 			return true
 		})
 		file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
 			t := value.(*file.Tunnel)
 			if t.Client.Id == v.Id {
-				v.Flow.InletFlow += t.Flow.InletFlow
-				v.Flow.ExportFlow += t.Flow.ExportFlow
+				in, out := t.Flow.Snapshot()
+				inletFlow += in
+				exportFlow += out
 			}
 			return true
 		})
+		v.Flow.Set(inletFlow, exportFlow)
 		return true
 	})
 	return
@@ -487,8 +632,9 @@ func GetDashboardData() map[string]interface{} {
 		if v.IsConnect {
 			c += 1
 		}
-		in += v.Flow.InletFlow
-		out += v.Flow.ExportFlow
+		clientIn, clientOut := v.Flow.Snapshot()
+		in += clientIn
+		out += clientOut
 		return true
 	})
 	data["clientOnlineCount"] = c

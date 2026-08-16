@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -75,6 +74,9 @@ func (s *WebServer) Start() error {
 	if err := validateWebCredentials(username, password); err != nil {
 		return err
 	}
+	if err := validateAPISecret(beego.AppConfig.String("auth_key")); err != nil {
+		return err
+	}
 	beego.BConfig.WebConfig.Session.SessionOn = true
 	beego.BConfig.WebConfig.EnableXSRF = true
 	xsrfKey := sha256.Sum256([]byte("nps-xsrf:" + username + ":" + password + ":" + beego.AppConfig.String("auth_key")))
@@ -117,7 +119,14 @@ func validateWebCredentials(username, password string) error {
 		"123": {}, "admin": {}, "password": {}, "change_me_before_start": {},
 	}
 	if _, found := weak[strings.ToLower(strings.TrimSpace(password))]; found {
-		return fmt.Errorf("web_password %q is a placeholder or commonly used password", password)
+		return errors.New("web_password is a placeholder or commonly used password")
+	}
+	return nil
+}
+
+func validateAPISecret(secret string) error {
+	if secret != "" && len(secret) < 32 {
+		return errors.New("auth_key must contain at least 32 characters when API authentication is enabled")
 	}
 	return nil
 }

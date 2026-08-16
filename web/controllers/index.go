@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"time"
+
 	"ehang.io/nps/lib/file"
 	"ehang.io/nps/server"
 	"ehang.io/nps/server/tool"
@@ -191,6 +193,31 @@ func (s *IndexController) GetOneTunnel() {
 	s.Data["json"] = data
 	s.ServeJSON()
 }
+
+// SocksStatus returns the runtime traffic activity and idle-close countdown for
+// a managed SOCKS tunnel. The managed tunnel ID is equal to its client ID.
+func (s *IndexController) SocksStatus() {
+	s.requirePost()
+	id := s.GetIntNoErr("id")
+	if id <= 0 {
+		id = s.GetIntNoErr("client_id")
+	}
+	if !s.isAdminRequest() {
+		id = s.GetSession("clientId").(int)
+	}
+	data := make(map[string]interface{})
+	activity, err := server.GetManagedSocksActivity(id, time.Now())
+	if err != nil || id <= 0 {
+		data["code"] = 0
+		data["msg"] = "managed socks5 tunnel not found"
+	} else {
+		data["code"] = 1
+		data["data"] = activity
+	}
+	s.Data["json"] = data
+	s.ServeJSON()
+}
+
 func (s *IndexController) Edit() {
 	id := s.GetIntNoErr("id")
 	if s.Ctx.Request.Method == "GET" {

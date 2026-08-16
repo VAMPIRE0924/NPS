@@ -163,7 +163,7 @@ func (s *DbUtils) GetIdByVerifyKey(vKey string, addr string) (id int, err error)
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if common.Getverifyval(v.VerifyKey) == vKey && v.Status {
+		if common.ConstantTimeEqual(common.Getverifyval(v.VerifyKey), vKey) && v.Status {
 			v.Addr = common.GetIpByAddr(addr)
 			id = v.Id
 			exist = true
@@ -219,11 +219,10 @@ func (s *DbUtils) UpdateTaskByModeId(oldMode string, oldId int, t *Tunnel) error
 		return errors.New("task is nil")
 	}
 	if oldMode == "" {
-		oldTask, err := s.GetTask(oldId)
-		if err != nil {
-			return err
-		}
-		oldMode = oldTask.Mode
+		return errors.New("task mode is required")
+	}
+	if t.Mode == "" {
+		return errors.New("new task mode is required")
 	}
 	oldMode = CanonicalTaskMode(oldMode)
 	t.Mode = CanonicalTaskMode(t.Mode)
@@ -251,11 +250,7 @@ func (s *DbUtils) UpdateTaskByModeId(oldMode string, oldId int, t *Tunnel) error
 
 func (s *DbUtils) SetTaskStatusByMode(mode string, id int, status bool) error {
 	if mode == "" {
-		t, err := s.GetTask(id)
-		if err != nil {
-			return err
-		}
-		mode = t.Mode
+		return errors.New("task mode is required")
 	}
 	mode = CanonicalTaskMode(mode)
 	s.JsonDb.idLock.Lock()
@@ -278,11 +273,7 @@ func (s *DbUtils) SetTaskStatusByMode(mode string, id int, status bool) error {
 
 func (s *DbUtils) DelTaskByMode(mode string, id int) error {
 	if mode == "" {
-		t, err := s.GetTask(id)
-		if err != nil {
-			return err
-		}
-		mode = t.Mode
+		return errors.New("task mode is required")
 	}
 	mode = CanonicalTaskMode(mode)
 	s.JsonDb.idLock.Lock()
@@ -304,27 +295,9 @@ func (s *DbUtils) GetTaskByMd5Password(p string) (t *Tunnel) {
 	return
 }
 
-func (s *DbUtils) GetTask(id int) (t *Tunnel, err error) {
-	var found []*Tunnel
-	s.JsonDb.Tasks.Range(func(key, value interface{}) bool {
-		v := value.(*Tunnel)
-		if v.Id == id {
-			found = append(found, v)
-		}
-		return true
-	})
-	if len(found) == 0 {
-		return nil, errors.New("not found")
-	}
-	if len(found) > 1 {
-		return nil, errors.New("task id is ambiguous, please specify type")
-	}
-	return found[0], nil
-}
-
 func (s *DbUtils) GetTaskByMode(mode string, id int) (t *Tunnel, err error) {
 	if mode == "" {
-		return s.GetTask(id)
+		return nil, errors.New("task mode is required")
 	}
 	mode = CanonicalTaskMode(mode)
 	if v, ok := s.JsonDb.Tasks.Load(TaskKey(mode, id)); ok {
@@ -488,7 +461,7 @@ func (s *DbUtils) UpdateClient(t *Client) error {
 	}
 	s.JsonDb.idLock.Lock()
 	defer s.JsonDb.idLock.Unlock()
-	ensureClientRuntime(t, t.RateLimit == 0 || t.Rate == nil)
+	ensureClientRuntime(t, false)
 	s.JsonDb.Clients.Store(t.Id, t)
 	if _, err := s.upsertManagedSocksForClientLocked(t); err != nil {
 		return err

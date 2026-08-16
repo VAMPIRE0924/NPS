@@ -1,9 +1,9 @@
 package proxy
 
 import (
+	"errors"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -40,13 +40,17 @@ func (s *UdpModeServer) Start() error {
 		buf := common.BufPoolUdp.Get().([]byte)
 		n, addr, err := s.listener.ReadFromUDP(buf)
 		if err != nil {
-			if strings.Contains(err.Error(), "use of closed network connection") {
+			common.BufPoolUdp.Put(buf)
+			if errors.Is(err, net.ErrClosed) {
 				break
 			}
 			continue
 		}
 		logs.Trace("New udp connection,client %d,remote address %s", s.task.Client.Id, addr)
-		go s.process(addr, buf[:n])
+		go func(remoteAddr *net.UDPAddr, packet []byte, packetLen int) {
+			defer common.BufPoolUdp.Put(packet)
+			s.process(remoteAddr, packet[:packetLen])
+		}(addr, buf, n)
 	}
 	return nil
 }

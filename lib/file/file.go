@@ -204,7 +204,8 @@ func loadSyncMapFromFile(filePath string, f func(value string)) {
 }
 
 func storeSyncMapToFile(m *sync.Map, filePath string) {
-	file, err := os.Create(filePath + ".tmp")
+	tmpPath := filePath + ".tmp"
+	file, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	// first create a temporary file to store
 	if err != nil {
 		panic(err)
@@ -247,10 +248,18 @@ func storeSyncMapToFile(m *sync.Map, filePath string) {
 		}
 		return true
 	})
-	_ = file.Sync()
-	_ = file.Close()
+	if err = file.Sync(); err != nil {
+		_ = file.Close()
+		panic(err)
+	}
+	if err = file.Close(); err != nil {
+		panic(err)
+	}
+	if err = os.Chmod(tmpPath, 0600); err != nil {
+		panic(err)
+	}
 	// must close file first, then rename it
-	err = os.Rename(filePath+".tmp", filePath)
+	err = os.Rename(tmpPath, filePath)
 	if err != nil {
 		logs.Error(err, "store to file err, data will lost")
 	}

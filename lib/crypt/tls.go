@@ -10,10 +10,7 @@ import (
 	"log"
 	"math/big"
 	"net"
-	"os"
 	"time"
-
-	"github.com/astaxie/beego/logs"
 )
 
 var (
@@ -31,19 +28,20 @@ func InitTls() {
 }
 
 func NewTlsServerConn(conn net.Conn) net.Conn {
-	var err error
-	if err != nil {
-		logs.Error(err)
-		os.Exit(0)
-		return nil
+	config := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
 	}
-	config := &tls.Config{Certificates: []tls.Certificate{cert}}
 	return tls.Server(conn, config)
 }
 
 func NewTlsClientConn(conn net.Conn) net.Conn {
+	// NPS generates an ephemeral self-signed certificate at startup and the
+	// original NPC protocol does not exchange a trust anchor. Certificate
+	// verification cannot be enabled here without breaking existing NPCs.
 	conf := &tls.Config{
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: true, // #nosec G402 -- required by the legacy NPC wire protocol
+		MinVersion:         tls.VersionTLS12,
 	}
 	return tls.Client(conn, conf)
 }

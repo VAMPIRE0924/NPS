@@ -357,7 +357,11 @@ func (s *Conn) SetReadDeadline(t time.Time) error {
 
 // get the assembled amount data(len 4 and content)
 func GetLenBytes(buf []byte) (b []byte, err error) {
+	if uint64(len(buf)) > uint64(^uint32(0)>>1) {
+		return nil, errors.New("payload is too large")
+	}
 	raw := bytes.NewBuffer([]byte{})
+	// #nosec G115 -- the explicit bound above guarantees the int32 conversion.
 	if err = binary.Write(raw, binary.LittleEndian, int32(len(buf))); err != nil {
 		return
 	}
