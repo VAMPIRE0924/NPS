@@ -9,7 +9,7 @@ authentication.
 | Tag | Purpose |
 | --- | --- |
 | `main` | Latest accepted stable build from the protected `main` branch |
-| `<VERSION>` | Immutable release channel, for example `0.2.1` |
+| `<VERSION>` | Immutable release channel, for example `2.0.0` |
 | `dev` | Development build; use only for testing |
 
 Supported platforms: `linux/amd64` and `linux/arm64`.

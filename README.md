@@ -148,7 +148,7 @@ web/
 | 标签 | 用途 |
 | --- | --- |
 | `main` | 通过验收并合入受保护 `main` 分支的最新稳定构建 |
-| `<VERSION>` | 固定正式版本，例如 `0.2.1`，生产环境推荐使用 |
+| `<VERSION>` | 固定正式版本，例如 `2.0.0`，生产环境推荐使用 |
 | `dev` | `dev` 分支测试构建，不建议生产使用 |
 
 首次启动前先下载公开配置模板，并将占位管理密码替换为至少 12 位的唯一强密码：
@@ -169,7 +169,7 @@ docker run -d \
   --restart unless-stopped \
   --network host \
   -v /宿主机/nps/conf:/nps/conf \
-  vampirerune/nps:0.2.1
+  vampirerune/nps:2.0.0
 ```
 
 Linux 使用 `--network host` 时无需逐个映射动态隧道端口。使用 bridge 网络时，需要映射
