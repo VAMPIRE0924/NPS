@@ -87,6 +87,7 @@
         <div class="login-card">
             <div class="ibox-content">
                 <form class="m-t" onsubmit="return false">
+                    <input type="hidden" name="_xsrf" value="{{.xsrf_token}}">
                     <div class="form-group">
                         <input name="username" class="form-control" placeholder="username" required="" langtag="word-username">
                     </div>
@@ -104,7 +105,7 @@
     </div>
 
     <script type="text/javascript">
-        window.nps = { "web_base_url": "{{.web_base_url}}" }
+        window.nps = { "web_base_url": "{{.web_base_url}}", "xsrf_token": "{{.xsrf_token}}" }
         function login() {
             $.ajax({
                 type: "POST",

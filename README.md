@@ -12,6 +12,8 @@
 - SOCKS5 代理默认关闭，只允许在管理端/API 中打开或关闭。
 - SOCKS5隧道无流量 30 分钟 -> 自动关闭 SOCKS 并持久化 Status=false
 - NPC 上报的 Basic 认证用户名和密码无效化，Basic 只由 NPS 服务端配置控制。
+- Web 写操作使用 CSRF 防护，API 使用带时间窗和 nonce 防重放的 HMAC-SHA256。
+- Web 管理密码至少 12 个字符，样例占位密码不能启动管理端。
 
 ## ID 规则
 
@@ -90,6 +92,8 @@ Web 客户端列表支持单独或批量修改 Basic 认证用户名和密码；
 
 ## 构建
 
+需要 Go 1.25 或更新版本；`go.mod` 固定使用带安全修复的 Go 1.26.6 工具链。
+
 Windows amd64:
 
 ```powershell
@@ -120,4 +124,11 @@ web/
 
 ## API 文档
 
-详见 [API.md](API.md)。
+详见 [API.md](API.md)。旧版 MD5 查询参数认证已移除，升级现有 API 调用方时必须改用
+`X-NPS-Timestamp`、`X-NPS-Nonce` 和 `X-NPS-Signature` 请求头。
+
+## 首次启动与升级
+
+复制 `conf/nps.conf` 后，先把 `web_password=CHANGE_ME_BEFORE_START` 改成至少 12 个字符的
+唯一强密码。`auth_key` 默认留空（API 关闭）；需要 API 时请设置独立的长随机密钥。
+生产环境应启用 TLS，并把 Web 管理端限制在受信网络。

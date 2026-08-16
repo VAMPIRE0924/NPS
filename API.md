@@ -28,24 +28,23 @@ Content-Type: application/x-www-form-urlencoded
 
 ## 鉴权
 
-保留 NPS 原有 `auth_key` 机制：
+在 `nps.conf` 中设置一个足够长的随机 `auth_key` 后，每个 API 请求携带：
 
 ```text
-timestamp = 当前 Unix 秒级时间戳
-auth_key  = md5(nps.conf 中的 auth_key + timestamp)
+X-NPS-Timestamp: Unix 秒级时间戳
+X-NPS-Nonce: 16–128 位、每次请求唯一的随机字符串（字母、数字、-、_）
+X-NPS-Signature: HMAC-SHA256 十六进制小写结果
 ```
 
-服务端允许约 20 秒时间偏差。
+签名规范字符串为：
 
-示例：
-
-```bash
-curl -X POST "http://127.0.0.1:8080/index/start/" \
-  -d "id=1" \
-  -d "type=socks5" \
-  -d "timestamp=<timestamp>" \
-  -d "auth_key=<md5>"
+```text
+METHOD + "\n" + PATH_WITH_RAW_QUERY + "\n" + TIMESTAMP + "\n" + NONCE + "\n" + SHA256_HEX(BODY)
 ```
+
+以 `auth_key` 原始文本作为 HMAC 密钥。服务端只接受 30 秒时间窗内的请求，拒绝重复
+nonce、超过 1 MiB 的请求体和签名不匹配的请求。`auth_key` 留空表示 API 认证关闭；
+旧版 MD5 查询参数认证和 authKey 导出接口均已移除。
 
 ## ID 规则
 
@@ -96,8 +95,6 @@ limit
 search
 sort
 order
-timestamp
-auth_key
 ```
 
 ### 获取单个客户端
@@ -110,8 +107,6 @@ POST /client/getclient/
 
 ```text
 id
-timestamp
-auth_key
 ```
 
 ### 新增客户端
@@ -136,8 +131,6 @@ max_conn            0 表示不限制
 max_tunnel          0 表示不限制
 web_username
 web_password
-timestamp
-auth_key
 ```
 
 行为：
@@ -171,14 +164,12 @@ id          单个客户端 ID，和 ids 二选一
 ids         批量客户端 ID，逗号分隔，例如 1,2,3
 u           Basic 认证用户名，可留空
 p           Basic 认证密码，可留空
-timestamp
-auth_key
 ```
 
 行为：
 
 ```text
-1. 只允许管理员或 auth_key API 调用。
+1. 只允许管理员或 HMAC API 调用。
 2. 只修改客户端 Cnf.U / Cnf.P，不修改客户端 ID、备注、流量、速率、SOCKS5 等其它字段。
 3. 批量修改会先校验全部 ID；只要有一个 ID 不存在或非法，就不会写入任何客户端。
 4. 留空 u 或 p 会按空值保存，可用于统一清空 Basic 用户名或密码。
@@ -207,8 +198,6 @@ max_conn
 max_tunnel
 web_username
 web_password
-timestamp
-auth_key
 ```
 
 行为：
@@ -229,8 +218,6 @@ POST /client/del/
 
 ```text
 id
-timestamp
-auth_key
 ```
 
 行为：
@@ -253,8 +240,6 @@ POST /client/changestatus/
 ```text
 id
 status      true/false 或 1/0
-timestamp
-auth_key
 ```
 
 该接口只控制客户端是否允许连接，不等同于 SOCKS5 开关。
@@ -275,8 +260,6 @@ client_id     可选
 offset
 limit
 search
-timestamp
-auth_key
 ```
 
 说明：
@@ -297,8 +280,6 @@ POST /index/getonetunnel/
 ```text
 id
 type
-timestamp
-auth_key
 ```
 
 ### 新增隧道
@@ -320,8 +301,6 @@ password
 local_path
 strip_pre
 local_proxy   1/0
-timestamp
-auth_key
 ```
 
 说明：
@@ -353,8 +332,6 @@ password
 local_path
 strip_pre
 local_proxy
-timestamp
-auth_key
 ```
 
 说明：
@@ -375,8 +352,6 @@ POST /index/del/
 ```text
 id
 type
-timestamp
-auth_key
 ```
 
 说明：
@@ -397,18 +372,17 @@ POST /index/start/
 ```text
 id
 type
-timestamp
-auth_key
 ```
 
 SOCKS5 开关示例：
 
 ```bash
 curl -X POST "http://127.0.0.1:8080/index/start/" \
+  -H "X-NPS-Timestamp: <timestamp>" \
+  -H "X-NPS-Nonce: <unique-nonce>" \
+  -H "X-NPS-Signature: <hmac-sha256>" \
   -d "id=3" \
-  -d "type=socks5" \
-  -d "timestamp=<timestamp>" \
-  -d "auth_key=<md5>"
+  -d "type=socks5"
 ```
 
 ### 停止隧道
@@ -422,18 +396,17 @@ POST /index/stop/
 ```text
 id
 type
-timestamp
-auth_key
 ```
 
 SOCKS5 关闭示例：
 
 ```bash
 curl -X POST "http://127.0.0.1:8080/index/stop/" \
+  -H "X-NPS-Timestamp: <timestamp>" \
+  -H "X-NPS-Nonce: <unique-nonce>" \
+  -H "X-NPS-Signature: <hmac-sha256>" \
   -d "id=3" \
-  -d "type=socks5" \
-  -d "timestamp=<timestamp>" \
-  -d "auth_key=<md5>"
+  -d "type=socks5"
 ```
 
 ## SOCKS5 状态字段

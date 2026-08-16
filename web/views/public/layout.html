@@ -104,9 +104,12 @@
                         </span>
                     </li>
                     <li>
-                        <a href="{{.web_base_url}}/login/out">
-                            <i class="fa fa-sign-in-alt"></i><span langtag="word-logout"></span>
-                        </a>
+                        <form method="post" action="{{.web_base_url}}/login/out" style="margin: 0">
+                            <input type="hidden" name="_xsrf" value="{{.xsrf_token}}">
+                            <button type="submit" class="btn btn-link" style="padding: 20px 10px">
+                                <i class="fa fa-sign-in-alt"></i><span langtag="word-logout"></span>
+                            </button>
+                        </form>
                     </li>
                 </ul>
             </nav>
@@ -120,7 +123,7 @@
 </html>
 
 <script>
-    window.nps = { "web_base_url": "{{.web_base_url}}" }
+    window.nps = { "web_base_url": "{{.web_base_url}}", "xsrf_token": "{{.xsrf_token}}" }
 /*     googleTranslateElementInit()
     
      function googleTranslateElementInit() {

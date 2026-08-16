@@ -1,4 +1,9 @@
 (function ($) {
+	$(function () {
+		if (window.nps && window.nps.xsrf_token) {
+			$.ajaxSetup({headers: {"X-Xsrftoken": window.nps.xsrf_token}});
+		}
+	});
 
 	function xml2json(Xml) {
 		var tempvalue, tempJson = {};

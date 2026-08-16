@@ -3,6 +3,7 @@ package controllers
 import (
 	"math/rand"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -24,17 +25,20 @@ type record struct {
 }
 
 func (self *LoginController) Index() {
-	// Try login implicitly, will succeed if it's configured as no-auth(empty username&password).
 	webBaseUrl := beego.AppConfig.String("web_base_url")
-	if self.doLogin("", "", false) {
-		self.Redirect(webBaseUrl+"/index/index", 302)
-	}
 	self.Data["web_base_url"] = webBaseUrl
+	self.Data["xsrf_token"] = self.XSRFToken()
 	self.Data["register_allow"], _ = beego.AppConfig.Bool("allow_user_register")
 	self.TplName = "login/index.html"
 }
 
 func (self *LoginController) Verify() {
+	if self.Ctx.Request.Method != http.MethodPost {
+		self.Ctx.Output.SetStatus(http.StatusMethodNotAllowed)
+		self.Data["json"] = map[string]interface{}{"status": 0, "msg": "method not allowed"}
+		self.ServeJSON()
+		return
+	}
 	username := self.GetString("username")
 	password := self.GetString("password")
 	if self.doLogin(username, password, true) {
@@ -59,6 +63,7 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 	}
 	var auth bool
 	if password == beego.AppConfig.String("web_password") && username == beego.AppConfig.String("web_username") {
+		self.SessionRegenerateID()
 		self.SetSession("isAdmin", true)
 		self.DelSession("clientId")
 		self.DelSession("username")
@@ -83,6 +88,7 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 				auth = true
 			}
 			if auth {
+				self.SessionRegenerateID()
 				self.SetSession("isAdmin", false)
 				self.SetSession("clientId", v.Id)
 				self.SetSession("username", v.WebUserName)
@@ -108,8 +114,13 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 func (self *LoginController) Register() {
 	if self.Ctx.Request.Method == "GET" {
 		self.Data["web_base_url"] = beego.AppConfig.String("web_base_url")
+		self.Data["xsrf_token"] = self.XSRFToken()
 		self.TplName = "login/register.html"
 	} else {
+		if self.Ctx.Request.Method != http.MethodPost {
+			self.Ctx.Output.SetStatus(http.StatusMethodNotAllowed)
+			return
+		}
 		if b, err := beego.AppConfig.Bool("allow_user_register"); err != nil || !b {
 			self.Data["json"] = map[string]interface{}{"status": 0, "msg": "register is not allow"}
 			self.ServeJSON()
@@ -137,7 +148,11 @@ func (self *LoginController) Register() {
 }
 
 func (self *LoginController) Out() {
-	self.SetSession("auth", false)
+	if self.Ctx.Request.Method != http.MethodPost {
+		self.Ctx.Output.SetStatus(http.StatusMethodNotAllowed)
+		return
+	}
+	self.DestroySession()
 	self.Redirect(beego.AppConfig.String("web_base_url")+"/login/index", 302)
 }
 

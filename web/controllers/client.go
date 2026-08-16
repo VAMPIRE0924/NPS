@@ -22,6 +22,7 @@ func (s *ClientController) List() {
 		s.display("client/list")
 		return
 	}
+	s.requirePost()
 	start, length := s.GetAjaxParams()
 	clientIdSession := s.GetSession("clientId")
 	var clientId int
@@ -46,6 +47,7 @@ func (s *ClientController) Add() {
 		s.display()
 		return
 	}
+	s.requirePost()
 	t := &file.Client{
 		VerifyKey: s.getEscapeString("vkey"),
 		Status:    true,
@@ -75,26 +77,22 @@ func (s *ClientController) Add() {
 }
 
 func (s *ClientController) GetClient() {
-	if s.Ctx.Request.Method == "POST" {
-		id := s.GetIntNoErr("id")
-		data := make(map[string]interface{})
-		if c, err := file.GetDb().GetClient(id); err != nil {
-			data["code"] = 0
-		} else {
-			data["code"] = 1
-			data["data"] = c
-		}
-		s.Data["json"] = data
-		s.ServeJSON()
+	s.requirePost()
+	id := s.GetIntNoErr("id")
+	data := make(map[string]interface{})
+	if c, err := file.GetDb().GetClient(id); err != nil {
+		data["code"] = 0
+	} else {
+		data["code"] = 1
+		data["data"] = c
 	}
+	s.Data["json"] = data
+	s.ServeJSON()
 }
 
 func (s *ClientController) Basic() {
-	if s.Ctx.Request.Method != "POST" {
-		s.AjaxErr("method not allowed")
-	}
-	isAdmin, _ := s.GetSession("isAdmin").(bool)
-	if !isAdmin {
+	s.requirePost()
+	if !s.isAdminRequest() {
 		s.AjaxErr("permission denied")
 	}
 	rawIds := strings.TrimSpace(s.getEscapeString("ids"))
@@ -138,6 +136,7 @@ func (s *ClientController) Edit() {
 		s.display()
 		return
 	}
+	s.requirePost()
 	c, err := file.GetDb().GetClient(id)
 	if err != nil {
 		s.error()
@@ -150,7 +149,7 @@ func (s *ClientController) Edit() {
 			return
 		}
 	}
-	if s.GetSession("isAdmin").(bool) {
+	if s.isAdminRequest() {
 		if !file.GetDb().VerifyVkey(s.getEscapeString("vkey"), c.Id) {
 			s.AjaxErr("Vkey duplicate, please reset")
 			return
@@ -170,7 +169,7 @@ func (s *ClientController) Edit() {
 	c.Cnf.Compress = common.GetBoolByStr(s.getEscapeString("compress"))
 	c.Cnf.Crypt = s.GetBoolNoErr("crypt")
 	b, err := beego.AppConfig.Bool("allow_user_change_username")
-	if s.GetSession("isAdmin").(bool) || (err == nil && b) {
+	if s.isAdminRequest() || (err == nil && b) {
 		c.WebUserName = s.getEscapeString("web_username")
 	}
 	c.WebPassword = s.getEscapeString("web_password")
@@ -192,6 +191,7 @@ func (s *ClientController) Edit() {
 }
 
 func (s *ClientController) ChangeStatus() {
+	s.requirePost()
 	id := s.GetIntNoErr("id")
 	if client, err := file.GetDb().GetClient(id); err == nil {
 		client.Status = s.GetBoolNoErr("status")
@@ -204,6 +204,7 @@ func (s *ClientController) ChangeStatus() {
 }
 
 func (s *ClientController) Del() {
+	s.requirePost()
 	id := s.GetIntNoErr("id")
 	_ = server.StopManagedSocksByClientId(id)
 	if err := file.GetDb().DelClient(id); err != nil {

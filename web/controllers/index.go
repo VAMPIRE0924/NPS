@@ -141,6 +141,7 @@ func (s *IndexController) Add() {
 		s.SetInfo("add tunnel")
 		s.display()
 	} else {
+		s.requirePost()
 		mode := s.getTaskMode()
 		if mode == file.TaskModeSocks {
 			s.AjaxErr("socks5 task is managed by client and cannot be modified")
@@ -206,6 +207,7 @@ func (s *IndexController) Edit() {
 		s.SetInfo("edit tunnel")
 		s.display()
 	} else {
+		s.requirePost()
 		oldMode := s.getEscapeString("old_type")
 		if oldMode == "" {
 			oldMode = s.getTaskMode()
@@ -261,6 +263,7 @@ func (s *IndexController) Edit() {
 }
 
 func (s *IndexController) Stop() {
+	s.requirePost()
 	id := s.GetIntNoErr("id")
 	mode := s.getTaskMode()
 	if err := server.StopServerByMode(mode, id); err != nil {
@@ -270,6 +273,7 @@ func (s *IndexController) Stop() {
 }
 
 func (s *IndexController) Del() {
+	s.requirePost()
 	id := s.GetIntNoErr("id")
 	mode := s.getTaskMode()
 	if mode == file.TaskModeSocks {
@@ -282,6 +286,7 @@ func (s *IndexController) Del() {
 }
 
 func (s *IndexController) Start() {
+	s.requirePost()
 	id := s.GetIntNoErr("id")
 	mode := s.getTaskMode()
 	if err := server.StartTaskByMode(mode, id); err != nil {
@@ -319,6 +324,7 @@ func (s *IndexController) GetHost() {
 }
 
 func (s *IndexController) DelHost() {
+	s.requirePost()
 	id := s.GetIntNoErr("id")
 	if err := file.GetDb().DelHost(id); err != nil {
 		s.AjaxErr("delete error")
@@ -333,6 +339,7 @@ func (s *IndexController) AddHost() {
 		s.SetInfo("add host")
 		s.display("index/hadd")
 	} else {
+		s.requirePost()
 		h := &file.Host{
 			Host:         s.getEscapeString("host"),
 			Target:       &file.Target{TargetStr: s.getEscapeString("target"), LocalProxy: s.GetBoolNoErr("local_proxy")},
@@ -368,6 +375,7 @@ func (s *IndexController) EditHost() {
 		s.SetInfo("edit")
 		s.display("index/hedit")
 	} else {
+		s.requirePost()
 		if h, err := file.GetDb().GetHostById(id); err != nil {
 			s.error()
 		} else {

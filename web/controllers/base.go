@@ -2,13 +2,12 @@ package controllers
 
 import (
 	"html"
-	"math"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"ehang.io/nps/lib/common"
-	"ehang.io/nps/lib/crypt"
 	"ehang.io/nps/lib/file"
 	"ehang.io/nps/server"
 	"github.com/astaxie/beego"
@@ -16,8 +15,9 @@ import (
 
 type BaseController struct {
 	beego.Controller
-	controllerName string
-	actionName     string
+	controllerName   string
+	actionName       string
+	apiAuthenticated bool
 }
 
 // 初始化参数
@@ -26,22 +26,18 @@ func (s *BaseController) Prepare() {
 	controllerName, actionName := s.GetControllerAndAction()
 	s.controllerName = strings.ToLower(controllerName[0 : len(controllerName)-10])
 	s.actionName = strings.ToLower(actionName)
-	// web api verify
-	// param 1 is md5(authKey+Current timestamp)
-	// param 2 is timestamp (It's limited to 20 seconds.)
-	md5Key := s.getEscapeString("auth_key")
-	timestamp := s.GetIntNoErr("timestamp")
-	configKey := beego.AppConfig.String("auth_key")
-	timeNowUnix := time.Now().Unix()
-	if !(md5Key != "" && (math.Abs(float64(timeNowUnix-int64(timestamp))) <= 20) && (crypt.Md5(configKey+strconv.Itoa(timestamp)) == md5Key)) {
-		if s.GetSession("auth") != true {
-			s.Redirect(beego.AppConfig.String("web_base_url")+"/login/index", 302)
+	if hasAPIAuthHeaders(s.Ctx.Request) {
+		if err := requestAPIAuthenticator.verify(s.Ctx.Request, beego.AppConfig.String("auth_key"), time.Now()); err != nil {
+			s.rejectUnauthorized(err.Error())
 		}
-	} else {
-		s.SetSession("isAdmin", true)
-		s.Data["isAdmin"] = true
+		s.apiAuthenticated = true
+		s.EnableXSRF = false
+	} else if s.GetString("auth_key") != "" || s.GetString("timestamp") != "" {
+		s.rejectUnauthorized("legacy MD5 API authentication is no longer supported")
+	} else if s.GetSession("auth") != true {
+		s.Redirect(beego.AppConfig.String("web_base_url")+"/login/index", 302)
 	}
-	if s.GetSession("isAdmin") != nil && !s.GetSession("isAdmin").(bool) {
+	if !s.apiAuthenticated && s.GetSession("isAdmin") != nil && !s.GetSession("isAdmin").(bool) {
 		s.Ctx.Input.SetData("client_id", s.GetSession("clientId").(int))
 		s.Ctx.Input.SetParam("client_id", strconv.Itoa(s.GetSession("clientId").(int)))
 		s.Data["isAdmin"] = false
@@ -50,6 +46,7 @@ func (s *BaseController) Prepare() {
 	} else {
 		s.Data["isAdmin"] = true
 	}
+	s.Data["xsrf_token"] = s.XSRFToken()
 	s.Data["https_just_proxy"], _ = beego.AppConfig.Bool("https_just_proxy")
 	s.Data["allow_user_login"], _ = beego.AppConfig.Bool("allow_user_login")
 	s.Data["allow_flow_limit"], _ = beego.AppConfig.Bool("allow_flow_limit")
@@ -60,6 +57,28 @@ func (s *BaseController) Prepare() {
 	s.Data["allow_tunnel_num_limit"], _ = beego.AppConfig.Bool("allow_tunnel_num_limit")
 	s.Data["allow_local_proxy"], _ = beego.AppConfig.Bool("allow_local_proxy")
 	s.Data["allow_user_change_username"], _ = beego.AppConfig.Bool("allow_user_change_username")
+}
+
+func (s *BaseController) rejectUnauthorized(message string) {
+	s.Ctx.Output.SetStatus(http.StatusUnauthorized)
+	s.Data["json"] = ajax(message, 0)
+	s.ServeJSON()
+	s.StopRun()
+}
+
+func (s *BaseController) isAdminRequest() bool {
+	if s.apiAuthenticated {
+		return true
+	}
+	isAdmin, _ := s.GetSession("isAdmin").(bool)
+	return isAdmin
+}
+
+func (s *BaseController) requirePost() {
+	if s.Ctx.Request.Method != http.MethodPost {
+		s.Ctx.Output.SetStatus(http.StatusMethodNotAllowed)
+		s.AjaxErr("method not allowed")
+	}
 }
 
 // 加载模板

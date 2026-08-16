@@ -1,11 +1,16 @@
 package proxy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"ehang.io/nps/bridge"
 	"ehang.io/nps/lib/common"
@@ -65,24 +70,56 @@ func (s *WebServer) Start() error {
 		stop := make(chan struct{})
 		<-stop
 	}
+	username := beego.AppConfig.String("web_username")
+	password := beego.AppConfig.String("web_password")
+	if err := validateWebCredentials(username, password); err != nil {
+		return err
+	}
 	beego.BConfig.WebConfig.Session.SessionOn = true
+	beego.BConfig.WebConfig.EnableXSRF = true
+	xsrfKey := sha256.Sum256([]byte("nps-xsrf:" + username + ":" + password + ":" + beego.AppConfig.String("auth_key")))
+	beego.BConfig.WebConfig.XSRFKey = hex.EncodeToString(xsrfKey[:])
 	beego.SetStaticPath(beego.AppConfig.String("web_base_url")+"/static", filepath.Join(common.GetRunPath(), "web", "static"))
 	beego.SetViewsPath(filepath.Join(common.GetRunPath(), "web", "views"))
 	err := errors.New("Web management startup failure ")
 	var l net.Listener
 	if l, err = connection.GetWebManagerListener(); err == nil {
 		beego.InitBeforeHTTPRun()
+		webHTTPServer := &http.Server{
+			Handler:           beego.BeeApp.Handlers,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      60 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			MaxHeaderBytes:    1 << 20,
+		}
 		if beego.AppConfig.String("web_open_ssl") == "true" {
 			keyPath := beego.AppConfig.String("web_key_file")
 			certPath := beego.AppConfig.String("web_cert_file")
-			err = http.ServeTLS(l, beego.BeeApp.Handlers, certPath, keyPath)
+			err = webHTTPServer.ServeTLS(l, certPath, keyPath)
 		} else {
-			err = http.Serve(l, beego.BeeApp.Handlers)
+			err = webHTTPServer.Serve(l)
 		}
 	} else {
 		logs.Error(err)
 	}
 	return err
+}
+
+func validateWebCredentials(username, password string) error {
+	if strings.TrimSpace(username) == "" {
+		return errors.New("web_username must not be empty")
+	}
+	if len(password) < 12 {
+		return errors.New("web_password must contain at least 12 characters")
+	}
+	weak := map[string]struct{}{
+		"123": {}, "admin": {}, "password": {}, "change_me_before_start": {},
+	}
+	if _, found := weak[strings.ToLower(strings.TrimSpace(password))]; found {
+		return fmt.Errorf("web_password %q is a placeholder or commonly used password", password)
+	}
+	return nil
 }
 
 func (s *WebServer) Close() error {

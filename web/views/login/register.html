@@ -40,6 +40,7 @@
         <h3 langtag="info-register"></h3>
         <p langtag="info-createaccount"></p>
         <form class="m-t" role="form" onsubmit="return false">
+            <input type="hidden" name="_xsrf" value="{{.xsrf_token}}">
             <div class="form-group">
                 <input type="text" class="form-control" placeholder="username" name="username" required="" langtag="word-username">
             </div>
@@ -52,7 +53,7 @@
         </form>
     </div>
 <script>
-    window.nps = { "web_base_url": "{{.web_base_url}}" }
+    window.nps = { "web_base_url": "{{.web_base_url}}", "xsrf_token": "{{.xsrf_token}}" }
     function register() {
         $.ajax({
             type: "POST",
