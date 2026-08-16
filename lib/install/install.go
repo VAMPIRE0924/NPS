@@ -192,11 +192,11 @@ func copyStaticFile(srcPath, bin string) string {
 		if err := CopyDir(filepath.Join(srcPath, "web", "views"), filepath.Join(path, "web", "views")); err != nil {
 			log.Fatalln(err)
 		}
-		chMod(filepath.Join(path, "web", "views"), 0766)
+		chMod(filepath.Join(path, "web", "views"), 0755)
 		if err := CopyDir(filepath.Join(srcPath, "web", "static"), filepath.Join(path, "web", "static")); err != nil {
 			log.Fatalln(err)
 		}
-		chMod(filepath.Join(path, "web", "static"), 0766)
+		chMod(filepath.Join(path, "web", "static"), 0755)
 	}
 	binPath, _ := filepath.Abs(os.Args[0])
 	if !common.IsWindows() {
@@ -242,7 +242,7 @@ func InstallNps() string {
 		if err := CopyDir(filepath.Join(common.GetAppPath(), "conf"), filepath.Join(path, "conf")); err != nil {
 			log.Fatalln(err)
 		}
-		chMod(filepath.Join(path, "conf"), 0766)
+		chMod(filepath.Join(path, "conf"), 0700)
 	}
 	binPath := copyStaticFile(common.GetAppPath(), "nps")
 	log.Println("install ok!")
@@ -257,7 +257,7 @@ anywhere!`)
 nps.exe start|stop|restart|uninstall|update or nps-update.exe update
 now!`)
 	}
-	chMod(common.GetLogPath(), 0777)
+	chMod(common.GetLogPath(), 0640)
 	return binPath
 }
 func MkidrDirAll(path string, v ...string) {
@@ -269,6 +269,7 @@ func MkidrDirAll(path string, v ...string) {
 }
 
 func CopyDir(srcPath string, destPath string) error {
+	confData := filepath.Base(filepath.Clean(srcPath)) == "conf"
 	//检测目录正确性
 	if srcInfo, err := os.Stat(srcPath); err != nil {
 		fmt.Println(err.Error())
@@ -296,7 +297,11 @@ func CopyDir(srcPath string, destPath string) error {
 			log.Println("copy file ::" + path + " to " + destNewPath)
 			copyFile(path, destNewPath)
 			if !common.IsWindows() {
-				chMod(destNewPath, 0766)
+				mode := os.FileMode(0644)
+				if confData {
+					mode = 0600
+				}
+				chMod(destNewPath, mode)
 			}
 		}
 		return nil
@@ -323,7 +328,7 @@ func copyFile(src, dest string) (w int64, err error) {
 			if b == false {
 				log.Println("mkdir:" + destSplitPath)
 				//创建目录
-				err := os.Mkdir(destSplitPath, os.ModePerm)
+				err := os.Mkdir(destSplitPath, 0755)
 				if err != nil {
 					log.Fatalln(err)
 				}
@@ -353,6 +358,8 @@ func pathExists(path string) (bool, error) {
 
 func chMod(name string, mode os.FileMode) {
 	if !common.IsWindows() {
-		os.Chmod(name, mode)
+		if err := os.Chmod(name, mode); err != nil && !os.IsNotExist(err) {
+			log.Printf("chmod %s error: %v", name, err)
+		}
 	}
 }

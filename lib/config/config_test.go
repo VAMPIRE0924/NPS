@@ -49,15 +49,15 @@ p=2
 }
 
 func TestDealCommon(t *testing.T) {
-	s := `server=127.0.0.1:8284
-tp=tcp
+	s := `server_addr=127.0.0.1:8284
+conn_type=tcp
 vkey=123`
-	f := new(CommonConfig)
-	f.Server = "127.0.0.1:8284"
-	f.Tp = "tcp"
-	f.VKey = "123"
-	if c := dealCommon(s); *c != *f {
-		t.Fail()
+	c := dealCommon(s)
+	if c.Server != "127.0.0.1:8284" || c.Tp != "tcp" || c.VKey != "123" {
+		t.Fatalf("unexpected common config: %#v", c)
+	}
+	if c.Client == nil || c.Client.Cnf == nil {
+		t.Fatal("common config must initialize NPC client runtime fields")
 	}
 }
 

@@ -1,7 +1,7 @@
 package daemon
 
 import (
-	"io/ioutil"
+	"errors"
 	"log"
 	"os"
 	"os/exec"
@@ -47,19 +47,20 @@ func InitDaemon(f string, runPath string, pidPath string) {
 }
 
 func reload(f string, pidPath string) {
-	if f == "nps" && !common.IsWindows() && !status(f, pidPath) {
+	if common.IsWindows() {
+		log.Println("reload is not supported on Windows")
+		return
+	}
+	if f == "nps" && !status(f, pidPath) {
 		log.Println("reload fail")
 		return
 	}
-	var c *exec.Cmd
-	var err error
-	b, err := ioutil.ReadFile(filepath.Join(pidPath, f+".pid"))
-	if err == nil {
-		c = exec.Command("/bin/bash", "-c", `kill -30 `+string(b))
-	} else {
-		log.Fatalln("reload error,pid file does not exist")
+	pid, err := readPID(f, pidPath)
+	if err != nil {
+		log.Println("reload error:", err)
+		return
 	}
-	if c.Run() == nil {
+	if exec.Command("kill", "-USR1", strconv.Itoa(pid)).Run() == nil {
 		log.Println("reload success")
 	} else {
 		log.Println("reload fail")
@@ -67,20 +68,27 @@ func reload(f string, pidPath string) {
 }
 
 func status(f string, pidPath string) bool {
-	var cmd *exec.Cmd
-	b, err := ioutil.ReadFile(filepath.Join(pidPath, f+".pid"))
-	if err == nil {
-		if !common.IsWindows() {
-			cmd = exec.Command("/bin/sh", "-c", "ps -ax | awk '{ print $1 }' | grep "+string(b))
-		} else {
-			cmd = exec.Command("tasklist")
-		}
-		out, _ := cmd.Output()
-		if strings.Index(string(out), string(b)) > -1 {
-			return true
-		}
+	pid, err := readPID(f, pidPath)
+	if err != nil {
+		return false
 	}
-	return false
+	if !common.IsWindows() {
+		return exec.Command("kill", "-0", strconv.Itoa(pid)).Run() == nil
+	}
+	out, err := exec.Command("tasklist", "/FI", "PID eq "+strconv.Itoa(pid), "/FO", "CSV", "/NH").Output()
+	return err == nil && strings.Contains(string(out), strconv.Itoa(pid))
+}
+
+func readPID(f, pidPath string) (int, error) {
+	b, err := os.ReadFile(filepath.Join(pidPath, f+".pid"))
+	if err != nil {
+		return 0, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 {
+		return 0, errors.New("invalid pid file")
+	}
+	return pid, nil
 }
 
 func start(osArgs []string, f string, pidPath, runPath string) {
@@ -89,33 +97,36 @@ func start(osArgs []string, f string, pidPath, runPath string) {
 		return
 	}
 	cmd := exec.Command(osArgs[0], osArgs[1:]...)
-	cmd.Start()
+	if err := cmd.Start(); err != nil {
+		log.Println("start error:", err)
+		return
+	}
 	if cmd.Process.Pid > 0 {
 		log.Println("start ok , pid:", cmd.Process.Pid, "config path:", runPath)
 		d1 := []byte(strconv.Itoa(cmd.Process.Pid))
-		ioutil.WriteFile(filepath.Join(pidPath, f+".pid"), d1, 0600)
+		if err := os.WriteFile(filepath.Join(pidPath, f+".pid"), d1, 0600); err != nil {
+			log.Println("write pid file error:", err)
+		}
 	} else {
 		log.Println("start error")
 	}
 }
 
-func stop(f string, p string, pidPath string) {
+func stop(f string, _ string, pidPath string) {
 	if !status(f, pidPath) {
 		log.Printf(" %s is not running", f)
 		return
 	}
+	pid, err := readPID(f, pidPath)
+	if err != nil {
+		log.Println("stop error:", err)
+		return
+	}
 	var c *exec.Cmd
-	var err error
 	if common.IsWindows() {
-		p := strings.Split(p, `\`)
-		c = exec.Command("taskkill", "/F", "/IM", p[len(p)-1])
+		c = exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid))
 	} else {
-		b, err := ioutil.ReadFile(filepath.Join(pidPath, f+".pid"))
-		if err == nil {
-			c = exec.Command("/bin/bash", "-c", `kill -9 `+string(b))
-		} else {
-			log.Fatalln("stop error,pid file does not exist")
-		}
+		c = exec.Command("kill", "-9", strconv.Itoa(pid))
 	}
 	err = c.Run()
 	if err != nil {

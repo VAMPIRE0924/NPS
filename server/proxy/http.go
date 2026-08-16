@@ -7,11 +7,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"ehang.io/nps/bridge"
 	"ehang.io/nps/lib/cache"
@@ -27,6 +27,7 @@ type httpServer struct {
 	httpPort      int
 	httpsPort     int
 	httpServer    *http.Server
+	httpListener  net.Listener
 	httpsServer   *http.Server
 	httpsListener net.Listener
 	useCache      bool
@@ -40,7 +41,6 @@ func NewHttp(bridge *bridge.Bridge, c *file.Tunnel, httpPort, httpsPort int, use
 		BaseServer: BaseServer{
 			task:   c,
 			bridge: bridge,
-			Mutex:  sync.Mutex{},
 		},
 		httpPort:  httpPort,
 		httpsPort: httpsPort,
@@ -61,34 +61,36 @@ func (s *httpServer) Start() error {
 	}
 	if s.httpPort > 0 {
 		s.httpServer = s.NewServer(s.httpPort, "http")
+		s.httpListener, err = connection.GetHttpListener()
+		if err != nil {
+			return err
+		}
 		go func() {
-			l, err := connection.GetHttpListener()
-			if err != nil {
+			if err := s.httpServer.Serve(s.httpListener); err != nil && err != http.ErrServerClosed {
 				logs.Error(err)
-				os.Exit(0)
-			}
-			err = s.httpServer.Serve(l)
-			if err != nil {
-				logs.Error(err)
-				os.Exit(0)
 			}
 		}()
 	}
 	if s.httpsPort > 0 {
 		s.httpsServer = s.NewServer(s.httpsPort, "https")
+		s.httpsListener, err = connection.GetHttpsListener()
+		if err != nil {
+			_ = s.Close()
+			return err
+		}
 		go func() {
-			s.httpsListener, err = connection.GetHttpsListener()
-			if err != nil {
+			if err := NewHttpsServer(s.httpsListener, s.bridge, s.useCache, s.cacheLen).Start(); err != nil {
 				logs.Error(err)
-				os.Exit(0)
 			}
-			logs.Error(NewHttpsServer(s.httpsListener, s.bridge, s.useCache, s.cacheLen).Start())
 		}()
 	}
 	return nil
 }
 
 func (s *httpServer) Close() error {
+	if s.httpListener != nil {
+		_ = s.httpListener.Close()
+	}
 	if s.httpsListener != nil {
 		s.httpsListener.Close()
 	}
@@ -264,7 +266,8 @@ func resetReqMethod(method string) string {
 
 func (s *httpServer) NewServer(port int, scheme string) *http.Server {
 	return &http.Server{
-		Addr: ":" + strconv.Itoa(port),
+		Addr:              ":" + strconv.Itoa(port),
+		ReadHeaderTimeout: 10 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			r.URL.Scheme = scheme
 			s.handleTunneling(w, r)

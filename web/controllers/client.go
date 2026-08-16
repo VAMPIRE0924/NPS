@@ -194,8 +194,14 @@ func (s *ClientController) ChangeStatus() {
 	s.requirePost()
 	id := s.GetIntNoErr("id")
 	if client, err := file.GetDb().GetClient(id); err == nil {
-		client.Status = s.GetBoolNoErr("status")
-		if client.Status == false {
+		status := s.GetBoolNoErr("status")
+		client.Lock()
+		client.Status = status
+		client.Unlock()
+		if err := file.GetDb().UpdateClient(client); err != nil {
+			s.AjaxErr(err.Error())
+		}
+		if !status {
 			server.DelClientConnect(client.Id)
 		}
 		s.AjaxOk("modified success")

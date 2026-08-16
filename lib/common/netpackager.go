@@ -46,18 +46,33 @@ func (addr *Addr) String() string {
 }
 
 func (addr *Addr) Decode(b []byte) error {
+	if len(b) < 1 {
+		return errors.New("decode error: missing address type")
+	}
 	addr.Type = b[0]
 	pos := 1
 	switch addr.Type {
 	case ipV4:
+		if len(b) < pos+net.IPv4len+2 {
+			return errors.New("decode error: truncated IPv4 address")
+		}
 		addr.Host = net.IP(b[pos : pos+net.IPv4len]).String()
 		pos += net.IPv4len
 	case ipV6:
+		if len(b) < pos+net.IPv6len+2 {
+			return errors.New("decode error: truncated IPv6 address")
+		}
 		addr.Host = net.IP(b[pos : pos+net.IPv6len]).String()
 		pos += net.IPv6len
 	case domainName:
+		if len(b) < pos+1 {
+			return errors.New("decode error: missing domain length")
+		}
 		addrlen := int(b[pos])
 		pos++
+		if addrlen == 0 || len(b) < pos+addrlen+2 {
+			return errors.New("decode error: invalid domain address")
+		}
 		addr.Host = string(b[pos : pos+addrlen])
 		pos += addrlen
 	default:
@@ -70,26 +85,42 @@ func (addr *Addr) Decode(b []byte) error {
 }
 
 func (addr *Addr) Encode(b []byte) (int, error) {
+	if len(b) < 1 {
+		return 0, errors.New("encode error: buffer is too small")
+	}
 	b[0] = addr.Type
 	pos := 1
 	switch addr.Type {
 	case ipV4:
+		if len(b) < pos+net.IPv4len+2 {
+			return 0, errors.New("encode error: buffer is too small")
+		}
 		ip4 := net.ParseIP(addr.Host).To4()
 		if ip4 == nil {
 			ip4 = net.IPv4zero.To4()
 		}
 		pos += copy(b[pos:], ip4)
 	case domainName:
+		if len(addr.Host) == 0 || len(addr.Host) > 255 || len(b) < pos+1+len(addr.Host)+2 {
+			return 0, errors.New("encode error: invalid domain address")
+		}
+		// #nosec G115 -- the domain length is explicitly capped at 255 above.
 		b[pos] = byte(len(addr.Host))
 		pos++
 		pos += copy(b[pos:], []byte(addr.Host))
 	case ipV6:
+		if len(b) < pos+net.IPv6len+2 {
+			return 0, errors.New("encode error: buffer is too small")
+		}
 		ip16 := net.ParseIP(addr.Host).To16()
 		if ip16 == nil {
 			ip16 = net.IPv6zero.To16()
 		}
 		pos += copy(b[pos:], ip16)
 	default:
+		if len(b) < pos+net.IPv4len+2 {
+			return 0, errors.New("encode error: buffer is too small")
+		}
 		b[0] = ipV4
 		copy(b[pos:pos+4], net.IPv4zero.To4())
 		pos += 4
@@ -111,9 +142,12 @@ func (h *UDPHeader) Write(w io.Writer) error {
 	if addr == nil {
 		addr = &Addr{}
 	}
-	length, _ := addr.Encode(b[3:])
+	length, err := addr.Encode(b[3:])
+	if err != nil {
+		return err
+	}
 
-	_, err := w.Write(b[:3+length])
+	_, err = w.Write(b[:3+length])
 	return err
 }
 
@@ -205,15 +239,21 @@ func (d *UDPDatagram) Write(w io.Writer) error {
 
 func ToSocksAddr(addr net.Addr) *Addr {
 	host := "0.0.0.0"
-	port := 0
+	var port uint16
 	if addr != nil {
-		h, p, _ := net.SplitHostPort(addr.String())
-		host = h
-		port, _ = strconv.Atoi(p)
+		h, p, err := net.SplitHostPort(addr.String())
+		if err == nil {
+			host = h
+			parsed, parseErr := strconv.ParseUint(p, 10, 16)
+			if parseErr == nil {
+				// #nosec G115 -- ParseUint with bitSize 16 bounds the conversion.
+				port = uint16(parsed)
+			}
+		}
 	}
 	return &Addr{
 		Type: ipV4,
 		Host: host,
-		Port: uint16(port),
+		Port: port,
 	}
 }

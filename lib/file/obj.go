@@ -24,6 +24,16 @@ func (s *Flow) Add(in, out int64) {
 	s.ExportFlow += int64(out)
 }
 
+func (s *Flow) Set(in, out int64) {
+	if s == nil {
+		return
+	}
+	s.Lock()
+	s.InletFlow = in
+	s.ExportFlow = out
+	s.Unlock()
+}
+
 func (s *Flow) Snapshot() (in, out int64) {
 	if s == nil {
 		return 0, 0
@@ -31,6 +41,15 @@ func (s *Flow) Snapshot() (in, out int64) {
 	s.RLock()
 	defer s.RUnlock()
 	return s.InletFlow, s.ExportFlow
+}
+
+func (s *Flow) SnapshotWithLimit() (in, out, limit int64) {
+	if s == nil {
+		return 0, 0, 0
+	}
+	s.RLock()
+	defer s.RUnlock()
+	return s.InletFlow, s.ExportFlow, s.FlowLimit
 }
 
 type Config struct {

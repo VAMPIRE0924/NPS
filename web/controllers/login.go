@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"math/rand"
 	"net"
 	"net/http"
 	"sync"
@@ -17,11 +16,48 @@ type LoginController struct {
 	beego.Controller
 }
 
-var ipRecord sync.Map
-
 type record struct {
 	hasLoginFailTimes int
 	lastLoginTime     time.Time
+}
+
+type loginAttemptStore struct {
+	mu      sync.Mutex
+	records map[string]record
+}
+
+var loginAttempts = &loginAttemptStore{records: make(map[string]record)}
+
+func (s *loginAttemptStore) blocked(ip string, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.records[ip]
+	if !ok {
+		return false
+	}
+	if now.Sub(record.lastLoginTime) >= time.Minute {
+		delete(s.records, ip)
+		return false
+	}
+	return record.hasLoginFailTimes >= 10
+}
+
+func (s *loginAttemptStore) failure(ip string, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record := s.records[ip]
+	if now.Sub(record.lastLoginTime) >= time.Minute {
+		record.hasLoginFailTimes = 0
+	}
+	record.hasLoginFailTimes++
+	record.lastLoginTime = now
+	s.records[ip] = record
+}
+
+func (s *loginAttemptStore) success(ip string) {
+	s.mu.Lock()
+	delete(s.records, ip)
+	s.mu.Unlock()
 }
 
 func (self *LoginController) Index() {
@@ -50,19 +86,13 @@ func (self *LoginController) Verify() {
 }
 
 func (self *LoginController) doLogin(username, password string, explicit bool) bool {
-	clearIprecord()
+	now := time.Now()
 	ip, _, _ := net.SplitHostPort(self.Ctx.Request.RemoteAddr)
-	if v, ok := ipRecord.Load(ip); ok {
-		vv := v.(*record)
-		if (time.Now().Unix() - vv.lastLoginTime.Unix()) >= 60 {
-			vv.hasLoginFailTimes = 0
-		}
-		if vv.hasLoginFailTimes >= 10 {
-			return false
-		}
+	if loginAttempts.blocked(ip, now) {
+		return false
 	}
 	var auth bool
-	if password == beego.AppConfig.String("web_password") && username == beego.AppConfig.String("web_username") {
+	if common.ConstantTimeEqual(password, beego.AppConfig.String("web_password")) && common.ConstantTimeEqual(username, beego.AppConfig.String("web_username")) {
 		self.SessionRegenerateID()
 		self.SetSession("isAdmin", true)
 		self.DelSession("clientId")
@@ -78,13 +108,13 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 				return true
 			}
 			if v.WebUserName == "" && v.WebPassword == "" {
-				if username != "user" || v.VerifyKey != password {
+				if !common.ConstantTimeEqual(username, "user") || !common.ConstantTimeEqual(v.VerifyKey, password) {
 					return true
 				} else {
 					auth = true
 				}
 			}
-			if !auth && v.WebPassword == password && v.WebUserName == username {
+			if !auth && common.ConstantTimeEqual(v.WebPassword, password) && common.ConstantTimeEqual(v.WebUserName, username) {
 				auth = true
 			}
 			if auth {
@@ -99,15 +129,12 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 	}
 	if auth {
 		self.SetSession("auth", true)
-		ipRecord.Delete(ip)
+		loginAttempts.success(ip)
 		return true
 
 	}
-	if v, load := ipRecord.LoadOrStore(ip, &record{hasLoginFailTimes: 1, lastLoginTime: time.Now()}); load && explicit {
-		vv := v.(*record)
-		vv.lastLoginTime = time.Now()
-		vv.hasLoginFailTimes += 1
-		ipRecord.Store(ip, vv)
+	if explicit {
+		loginAttempts.failure(ip, now)
 	}
 	return false
 }
@@ -154,18 +181,4 @@ func (self *LoginController) Out() {
 	}
 	self.DestroySession()
 	self.Redirect(beego.AppConfig.String("web_base_url")+"/login/index", 302)
-}
-
-func clearIprecord() {
-	rand.Seed(time.Now().UnixNano())
-	x := rand.Intn(100)
-	if x == 1 {
-		ipRecord.Range(func(key, value interface{}) bool {
-			v := value.(*record)
-			if time.Now().Unix()-v.lastLoginTime.Unix() >= 60 {
-				ipRecord.Delete(key)
-			}
-			return true
-		})
-	}
 }

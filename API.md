@@ -1,54 +1,116 @@
-# NPS API
+# NPS 重构版 API 说明
 
-## 基础约定
+本文是管理平台适配 NPS 的当前 HTTP 合约。源码以 `workspace/nps-dev/` 为准。
 
-接口路径受 `nps.conf` 中的 `web_base_url` 影响：
+版本边界：
+
+- 生产基线 `v0.2.2` 已使用本文的 HMAC-SHA256 鉴权和复合任务 ID。
+- `POST /index/socksstatus/` 是当前开发版新增接口，尚未发布到生产 `v0.2.2`。
+- 测试通过并重新发布后，才可在生产适配中启用该新增接口。
+
+## 1. 基础约定
+
+### 1.1 服务地址
+
+接口路径受 `nps.conf` 的 `web_base_url` 影响：
 
 ```text
-web_base_url 为空:  /client/list/
-web_base_url=/nps: /nps/client/list/
+web_base_url=       -> /client/list/
+web_base_url=/nps   -> /nps/client/list/
 ```
 
-推荐请求方式：
+外部系统应配置一个统一 `baseURL`，不要在业务代码中重复拼接前缀。
 
-```text
+### 1.2 请求格式
+
+除 `/auth/gettime/` 外，管理 API 推荐统一使用：
+
+```http
 POST
 Content-Type: application/x-www-form-urlencoded
 ```
 
-通用响应：
+签名覆盖的是编码后的原始请求体字节。生成签名后不得重新排序、重新编码或修改请求体。
+
+### 1.3 响应格式
+
+历史接口存在三种响应形状：
 
 ```json
-{"status":1,"msg":"success message"}
-{"status":0,"msg":"error message"}
+{"status":1,"msg":"success"}
 {"rows":[],"total":0}
 {"code":1,"data":{}}
-{"code":0}
 ```
 
-## 鉴权
+失败示例：
 
-在 `nps.conf` 中设置一个足够长的随机 `auth_key` 后，每个 API 请求携带：
+```json
+{"status":0,"msg":"business error"}
+{"code":0,"msg":"not found"}
+```
+
+适配层必须同时判断 HTTP 状态码和 JSON 中的 `status` 或 `code`。多数业务错误仍返回
+HTTP 200；鉴权失败返回 HTTP 401，方法错误返回 HTTP 405。
+
+## 2. API 鉴权
+
+### 2.1 配置
+
+在 `nps.conf` 中设置独立的长随机密钥：
+
+```ini
+auth_key=<仅保存在生产密钥系统中的随机密钥>
+```
+
+`auth_key` 非空时至少 32 个字符，建议使用密码学安全随机源生成 32 字节以上随机值。它不得与
+`web_password`、`public_vkey` 或任何 Client `VerifyKey` 复用。外部调用必须
+通过 TLS；不得把密钥、完整签名请求或包含密码的响应写入日志。
+
+### 2.2 请求头
+
+每次请求必须生成新的时间戳和 nonce：
 
 ```text
 X-NPS-Timestamp: Unix 秒级时间戳
-X-NPS-Nonce: 16–128 位、每次请求唯一的随机字符串（字母、数字、-、_）
+X-NPS-Nonce: 16-128 位，仅允许 A-Z a-z 0-9 _ -
 X-NPS-Signature: HMAC-SHA256 十六进制小写结果
 ```
 
-签名规范字符串为：
+### 2.3 签名规范
+
+规范字符串：
 
 ```text
 METHOD + "\n" + PATH_WITH_RAW_QUERY + "\n" + TIMESTAMP + "\n" + NONCE + "\n" + SHA256_HEX(BODY)
 ```
 
-以 `auth_key` 原始文本作为 HMAC 密钥。服务端只接受 30 秒时间窗内的请求，拒绝重复
-nonce、超过 1 MiB 的请求体和签名不匹配的请求。`auth_key` 留空表示 API 认证关闭；
-旧版 MD5 查询参数认证和 authKey 导出接口均已移除。
+说明：
 
-## ID 规则
+- `METHOD` 使用大写，例如 `POST`。
+- `PATH_WITH_RAW_QUERY` 是转义后的路径；存在查询参数时追加 `?` 和原始查询串。
+- `BODY` 是实际发送的完整原始字节；空请求体也要计算 SHA-256。
+- 以 `auth_key` 原始文本为 HMAC-SHA256 密钥，输出小写十六进制。
+- 服务端允许正负 30 秒时钟偏差。
+- nonce 在当前 NPS 进程内约 60 秒不可重复。
+- 最大请求体为 1 MiB。
+- 旧 `MD5(auth_key + timestamp)` 查询参数鉴权已移除。
 
-新增对象时由 NPS 服务端分配当前池内最小可用正整数 ID。调用方不要自己计算 `max(id)+1`。
+服务器时间可匿名读取：
+
+```text
+GET /auth/gettime/
+```
+
+```json
+{"time":1800000000}
+```
+
+完整调用代码见[签名与调用示例](API_SIGNING_EXAMPLES.md)。
+
+## 3. ID 与模式
+
+新增对象由服务端分配对应池内最小可用正整数。调用方不得提交或自行推算
+`max(id) + 1`。
 
 独立 ID 池：
 
@@ -63,236 +125,85 @@ p2p.Id
 file.Id
 ```
 
-任务内部唯一键：
+任务唯一键是 `type + ":" + id`。例如 `portForward:1` 和 `socks5:1` 是两个不同任务。
+调用任务详情、编辑、删除、启动和停止接口时必须携带真实 `type`。
+
+新平台允许的任务类型：
 
 ```text
-mode:id
+portForward  socks5  httpProxy  secret  p2p  file
 ```
 
-例如：
+`portForward` 同时承载 TCP 和 UDP。新平台不得建立独立 UDP 类型或 ID 池。
 
-```text
-portForward:1
-socks5:1
-httpProxy:1
-```
+## 4. 客户端 API
 
-调用任务接口时必须传 `type`。
+### 4.1 接口表
 
-## 客户端接口
+| 操作 | 方法与路径 | 参数 |
+| --- | --- | --- |
+| 列表 | `POST /client/list/` | `offset limit search sort order` |
+| 详情 | `POST /client/getclient/` | `id` |
+| 新增 | `POST /client/add/` | 见下方字段 |
+| 编辑 | `POST /client/edit/` | 新增字段加 `id` |
+| 修改连接权限 | `POST /client/changestatus/` | `id status` |
+| 修改 Basic | `POST /client/basic/` | `id` 或 `ids`，以及 `u p` |
+| 删除 | `POST /client/del/` | `id` |
 
-### 客户端列表
-
-```text
-POST /client/list/
-```
-
-参数：
-
-```text
-offset
-limit
-search
-sort
-order
-```
-
-### 获取单个客户端
-
-```text
-POST /client/getclient/
-```
-
-参数：
-
-```text
-id
-```
-
-### 新增客户端
-
-```text
-POST /client/add/
-```
-
-参数：
+新增/编辑字段：
 
 ```text
 remark
-vkey                留空则自动生成
-u                   Basic 用户名，服务端配置
-p                   Basic 密码，服务端配置
-compress            1/0
-crypt               1/0
-config_conn_allow   1/0
-rate_limit          KB/s，0 表示不限制
-flow_limit          MB，0 表示不限制
-max_conn            0 表示不限制
-max_tunnel          0 表示不限制
-web_username
-web_password
-```
-
-行为：
-
-```text
-1. Client.Id 自动取最小可用正整数。
-2. 自动创建托管 SOCKS5。
-3. socks5.Id = Client.Id。
-4. socks5.Port = 10000 + Client.Id。
-5. socks5.Remark = Client.Remark。
-6. socks5.Status 默认 false。
-```
-
-Basic 规则：
-
-```text
-Web/API 中的 u / p 有效。
-NPC 配置中的 basic_username / basic_password 可以存在，但 NPS 入库前会清空，不会覆盖服务端配置。
-```
-
-### 修改客户端 Basic 认证
-
-```text
-POST /client/basic/
-```
-
-参数：
-
-```text
-id          单个客户端 ID，和 ids 二选一
-ids         批量客户端 ID，逗号分隔，例如 1,2,3
-u           Basic 认证用户名，可留空
-p           Basic 认证密码，可留空
-```
-
-行为：
-
-```text
-1. 只允许管理员或 HMAC API 调用。
-2. 只修改客户端 Cnf.U / Cnf.P，不修改客户端 ID、备注、流量、速率、SOCKS5 等其它字段。
-3. 批量修改会先校验全部 ID；只要有一个 ID 不存在或非法，就不会写入任何客户端。
-4. 留空 u 或 p 会按空值保存，可用于统一清空 Basic 用户名或密码。
-```
-
-### 编辑客户端
-
-```text
-POST /client/edit/
-```
-
-参数：
-
-```text
-id
-remark
-vkey
+vkey                 留空时由服务端生成
 u
 p
-compress
-crypt
-config_conn_allow
-rate_limit
-flow_limit
-max_conn
-max_tunnel
+compress             1/0
+crypt                1/0
+config_conn_allow    1/0
+rate_limit           KB/s，0 表示不限制
+flow_limit           MB，0 表示不限制
+max_conn              0 表示不限制
+max_tunnel            0 表示不限制
 web_username
 web_password
 ```
 
-行为：
+新增可见 Client 时会自动创建一个默认关闭的托管 SOCKS：
 
 ```text
-1. Client.Id 不变。
-2. 对应 SOCKS5 备注同步为客户端备注。
-3. SOCKS5 开关状态不会被客户端编辑重置。
+socks5.Id        = Client.Id
+socks5.Client.Id = Client.Id
+socks5.Port      = 10000 + Client.Id
+socks5.Remark    = Client.Remark
+socks5.Status    = false
 ```
 
-### 删除客户端
+删除 Client 会同时删除对应托管 SOCKS、关联隧道和域名。Client 编辑是完整表单更新，不是
+PATCH；调用前应读取详情并提交完整字段，避免遗漏字段被清空。
+
+`/client/basic/` 的 `ids` 使用英文逗号分隔，例如 `1,2,3`。批量更新会先校验全部 ID，任一
+无效时不写入任何客户端。
+
+新增接口成功响应不返回新 ID。适配层应使用调用前生成的唯一 `vkey` 查回 Client，不能按最大
+ID 推断结果。
+
+## 5. 隧道 API
+
+### 5.1 接口表
+
+| 操作 | 方法与路径 | 参数 |
+| --- | --- | --- |
+| 列表 | `POST /index/gettunnel/` | `type client_id offset limit search` |
+| 详情 | `POST /index/getonetunnel/` | `id type` |
+| 新增 | `POST /index/add/` | `type client_id` 及模式字段 |
+| 编辑 | `POST /index/edit/` | `id type old_type` 及完整模式字段 |
+| 删除 | `POST /index/del/` | `id type` |
+| 启动 | `POST /index/start/` | `id type` |
+| 停止 | `POST /index/stop/` | `id type` |
+
+模式字段按需包含：
 
 ```text
-POST /client/del/
-```
-
-参数：
-
-```text
-id
-```
-
-行为：
-
-```text
-1. 删除客户端。
-2. 删除对应托管 SOCKS5。
-3. 删除该客户端关联的隧道和域名解析。
-4. 被删除的 Client.Id 之后可复用。
-```
-
-### 修改客户端连接状态
-
-```text
-POST /client/changestatus/
-```
-
-参数：
-
-```text
-id
-status      true/false 或 1/0
-```
-
-该接口只控制客户端是否允许连接，不等同于 SOCKS5 开关。
-
-## 隧道接口
-
-### 隧道列表
-
-```text
-POST /index/gettunnel/
-```
-
-参数：
-
-```text
-type          portForward/socks5/httpProxy/secret/p2p/file
-client_id     可选
-offset
-limit
-search
-```
-
-说明：
-
-```text
-type=socks5 查询托管 SOCKS5 列表。
-type=portForward 查询端口转发列表。
-```
-
-### 获取单个隧道
-
-```text
-POST /index/getonetunnel/
-```
-
-参数：
-
-```text
-id
-type
-```
-
-### 新增隧道
-
-```text
-POST /index/add/
-```
-
-参数：
-
-```text
-type          portForward/httpProxy/secret/p2p/file
-client_id
 port
 server_ip
 target
@@ -300,137 +211,128 @@ remark
 password
 local_path
 strip_pre
-local_proxy   1/0
+local_proxy    1/0
 ```
 
-说明：
+重要行为：
+
+- `type=portForward` 的一个规则在相同端口同时监听 TCP 和 UDP。
+- `type=socks5` 只允许列表、详情、状态查询、启动和停止；新增、编辑、删除会被拒绝。
+- 编辑接口是完整表单更新，不是 PATCH；切换任务类型时用 `old_type` 定位旧任务。
+- 删除后 ID 可在同一类型池内复用。
+- 创建失败不占用 ID。
+
+## 6. 托管 SOCKS 状态 API（开发版新增）
+
+### 6.1 请求
 
 ```text
-type=portForward 时，一个规则同时监听 TCP 和 UDP。
-type=socks5 会被拒绝，SOCKS5 只能由客户端托管生成。
-新增失败不会占用 ID。
+POST /index/socksstatus/
 ```
 
-### 编辑隧道
+请求体二选一；两者数值都等于 Client.Id：
 
 ```text
-POST /index/edit/
+id=3
+client_id=3
 ```
 
-参数：
+成功响应示例（正在运行，但当前无流量活动）：
+
+```json
+{
+  "code": 1,
+  "data": {
+    "id": 3,
+    "client_id": 3,
+    "enabled": true,
+    "running": true,
+    "active": false,
+    "countdown": true,
+    "last_active_at": 1800000000,
+    "idle_seconds": 600,
+    "remaining_seconds": 1200,
+    "auto_close_at": 1800001200,
+    "auto_close_timeout_seconds": 1800,
+    "inlet_flow": 1024,
+    "export_flow": 2048
+  }
+}
+```
+
+未找到：
+
+```json
+{"code":0,"msg":"managed socks5 tunnel not found"}
+```
+
+### 6.2 字段语义
+
+| 字段 | 含义 |
+| --- | --- |
+| `enabled` | 持久化配置开关 `Tunnel.Status` |
+| `running` | 服务是否存在于 NPS 实际运行表；判断是否正在监听应优先看它 |
+| `active` | 入口或出口累计流量在最近一次采样周期内发生变化 |
+| `countdown` | 已运行但当前无流量活动，正在执行空闲关闭倒计时 |
+| `last_active_at` | 计时器最近一次观察到流量变化的 Unix 秒；停止时为 0 |
+| `idle_seconds` | 自最近流量变化起的空闲秒数；停止时为 0 |
+| `remaining_seconds` | 预计距离自动关闭的剩余秒数；停止时为 0 |
+| `auto_close_at` | 预计自动关闭的 Unix 秒；停止时为 0 |
+| `auto_close_timeout_seconds` | 当前固定空闲阈值，现为 1800 秒 |
+| `inlet_flow` / `export_flow` | SOCKS 隧道累计入口/出口字节数 |
+
+`active` 表示流量活动，不代表 Client 在线，也不等同于 `running`。状态采样和自动关闭检查每分钟
+执行一次，因此 `remaining_seconds` 和 `auto_close_at` 是估算值，实际停止最多可能晚约一个采样
+周期。查询接口只读取状态，不会刷新或延长空闲计时器。
+
+适配建议：
 
 ```text
-id
-type
-old_type
-client_id
-port
-server_ip
-target
-remark
-password
-local_path
-strip_pre
-local_proxy
+running=false                 -> 显示“已停止”，不展示倒计时
+running=true, active=true     -> 显示“流量活跃”
+running=true, active=false    -> 显示“空闲，将在 remaining_seconds 秒后关闭”
 ```
 
-说明：
+## 7. 域名 API
+
+| 操作 | 方法与路径 | 参数 |
+| --- | --- | --- |
+| 列表 | `POST /index/hostlist/` | `client_id offset limit search` |
+| 详情 | `POST /index/gethost/` | `id` |
+| 新增 | `POST /index/addhost/` | 见下方字段 |
+| 编辑 | `POST /index/edithost/` | 新增字段加 `id` |
+| 删除 | `POST /index/delhost/` | `id` |
+
+新增/编辑字段：
 
 ```text
-socks5 不允许编辑。
-old_type 用于准确定位原任务池。
+client_id host scheme location target remark header hostchange
+key_file_path cert_file_path local_proxy
 ```
 
-### 删除隧道
+Host.Id 由独立池分配最小可用正整数。编辑同样按完整表单处理。
+
+## 8. 数据与安全注意事项
+
+旧模型直接序列化 Go 对象，详情和列表可能包含 `VerifyKey`、Basic 密码、Web 密码、隧道密码
+或嵌套配置。管理平台后端必须：
+
+- 只把业务需要的字段映射到自有 DTO，不得原样透传到前端。
+- 对密钥和密码字段做遮罩，并禁止写入应用日志、追踪系统和错误上报。
+- 在受信网络内调用 NPS，并强制验证 TLS 证书。
+- 客户端列表可省略 `sort`，在适配层使用字段白名单排序。
+- 任务主键保存为 `(type, id)`；只有托管 SOCKS 可按 Client.Id 直接定位。
+
+## 9. 推荐适配层模型
+
+管理平台不要把 NPS 原始 JSON 直接作为领域模型。建议至少保存：
 
 ```text
-POST /index/del/
+NpsClientRef     { npsInstanceId, clientId }
+NpsTunnelRef     { npsInstanceId, type, tunnelId }
+NpsHostRef       { npsInstanceId, hostId }
+SocksRuntime     { running, active, remainingSeconds, observedAt }
 ```
 
-参数：
-
-```text
-id
-type
-```
-
-说明：
-
-```text
-socks5 不允许删除。
-被删除的 ID 之后可被同一 type 复用。
-```
-
-### 启动隧道
-
-```text
-POST /index/start/
-```
-
-参数：
-
-```text
-id
-type
-```
-
-SOCKS5 开关示例：
-
-```bash
-curl -X POST "http://127.0.0.1:8080/index/start/" \
-  -H "X-NPS-Timestamp: <timestamp>" \
-  -H "X-NPS-Nonce: <unique-nonce>" \
-  -H "X-NPS-Signature: <hmac-sha256>" \
-  -d "id=3" \
-  -d "type=socks5"
-```
-
-### 停止隧道
-
-```text
-POST /index/stop/
-```
-
-参数：
-
-```text
-id
-type
-```
-
-SOCKS5 关闭示例：
-
-```bash
-curl -X POST "http://127.0.0.1:8080/index/stop/" \
-  -H "X-NPS-Timestamp: <timestamp>" \
-  -H "X-NPS-Nonce: <unique-nonce>" \
-  -H "X-NPS-Signature: <hmac-sha256>" \
-  -d "id=3" \
-  -d "type=socks5"
-```
-
-## SOCKS5 状态字段
-
-列表返回中重点关注：
-
-```text
-Id
-Client.Id
-Remark
-Port
-Status
-RunStatus
-Client.IsConnect
-Flow.InletFlow
-Flow.ExportFlow
-```
-
-说明：
-
-```text
-Status    表示配置开关是否开启。
-RunStatus 表示当前是否真的在监听运行。
-Flow      为隧道自身流量，可用于计算实时速率。
-```
-
-运行中的托管 SOCKS5 如果 30 分钟没有入口/出口流量变化，会自动关闭并持久化 `Status=false`。
+每次状态轮询都记录本地 `observedAt`，展示倒计时时用服务器返回的 `auto_close_at`，并定期重新
+查询，不要只依赖浏览器本地递减。

@@ -1,40 +1,46 @@
 package pmux
 
 import (
+	"net"
 	"testing"
 	"time"
-
-	"github.com/astaxie/beego/logs"
 )
 
-func TestPortMux_Close(t *testing.T) {
-	logs.Reset()
-	logs.EnableFuncCallDepth(true)
-	logs.SetLogFuncCallDepth(3)
-
-	pMux := NewPortMux(8888, "Ds")
+func TestPortMuxCloseUnblocksChildListener(t *testing.T) {
+	pMux := NewPortMux(0, "manager.example.com")
+	if err := pMux.Start(); err != nil {
+		t.Fatal(err)
+	}
+	listener := pMux.GetHttpListener()
+	result := make(chan error, 1)
 	go func() {
-		if pMux.Start() != nil {
-			logs.Warn("Error")
+		_, err := listener.Accept()
+		result <- err
+	}()
+	if err := pMux.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("expected child listener to close with the parent multiplexer")
 		}
-	}()
-	time.Sleep(time.Second * 3)
-	go func() {
-		l := pMux.GetHttpListener()
-		conn, err := l.Accept()
-		logs.Warn(conn, err)
-	}()
-	go func() {
-		l := pMux.GetHttpListener()
-		conn, err := l.Accept()
-		logs.Warn(conn, err)
-	}()
-	go func() {
-		l := pMux.GetHttpListener()
-		conn, err := l.Accept()
-		logs.Warn(conn, err)
-	}()
-	l := pMux.GetHttpListener()
-	conn, err := l.Accept()
-	logs.Warn(conn, err)
+	case <-time.After(time.Second):
+		t.Fatal("child listener did not unblock after multiplexer close")
+	}
+}
+
+func TestPortMuxStartReturnsBindError(t *testing.T) {
+	occupied, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	port := occupied.Addr().(*net.TCPAddr).Port
+
+	pMux := NewPortMux(port, "manager.example.com")
+	if err := pMux.Start(); err == nil {
+		_ = pMux.Close()
+		t.Fatal("expected occupied port to return an error")
+	}
 }

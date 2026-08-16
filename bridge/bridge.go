@@ -420,8 +420,14 @@ loop:
 					}
 					return true
 				})
-				binary.Write(c, binary.LittleEndian, int32(len([]byte(str))))
-				binary.Write(c, binary.LittleEndian, []byte(str))
+				payload, err := conn.GetLenBytes([]byte(str))
+				if err != nil {
+					logs.Error("encode work status error", err)
+					break loop
+				}
+				if _, err = c.Write(payload); err != nil {
+					break loop
+				}
 			}
 		case common.NEW_CONF:
 			var err error

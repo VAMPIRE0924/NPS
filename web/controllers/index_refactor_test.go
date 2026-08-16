@@ -24,3 +24,12 @@ func TestCloneTunnelForUpdateDoesNotMutateStoredCompositeKeyFields(t *testing.T)
 		t.Fatalf("stored task target changed through update clone: %s", original.Target.TargetStr)
 	}
 }
+
+func TestSocksStatusAuthorizationCannotUseAnotherTaskMode(t *testing.T) {
+	if got := authorizationTaskMode("socksstatus", file.TaskModePortForward); got != file.TaskModeSocks {
+		t.Fatalf("socks status authorization must resolve the managed socks pool, got %s", got)
+	}
+	if got := authorizationTaskMode("start", file.TaskModePortForward); got != file.TaskModePortForward {
+		t.Fatalf("other task actions must preserve their requested mode, got %s", got)
+	}
+}

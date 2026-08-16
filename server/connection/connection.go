@@ -2,7 +2,6 @@ package connection
 
 import (
 	"net"
-	"os"
 	"strconv"
 
 	"ehang.io/nps/lib/pmux"
@@ -26,9 +25,14 @@ func InitConnectionService() {
 		port, err := strconv.Atoi(bridgePort)
 		if err != nil {
 			logs.Error(err)
-			os.Exit(0)
+			return
 		}
-		pMux = pmux.NewPortMux(port, beego.AppConfig.String("web_host"))
+		candidate := pmux.NewPortMux(port, beego.AppConfig.String("web_host"))
+		if err := candidate.Start(); err != nil {
+			logs.Error("start port multiplexer:", err)
+			return
+		}
+		pMux = candidate
 	}
 }
 
@@ -75,8 +79,7 @@ func GetWebManagerListener() (net.Listener, error) {
 func getTcpListener(ip, p string) (net.Listener, error) {
 	port, err := strconv.Atoi(p)
 	if err != nil {
-		logs.Error(err)
-		os.Exit(0)
+		return nil, err
 	}
 	if ip == "" {
 		ip = "0.0.0.0"
