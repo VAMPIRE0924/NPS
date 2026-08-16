@@ -1,0 +1,70 @@
+name: Publish NPS release packages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing Git tag, for example v0.2.1
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  packages:
+    name: Build Linux and Windows amd64 packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || inputs.tag }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Require tag to point to main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.26.6
+          cache: true
+
+      - name: Build release packages
+        run: |
+          set -eu
+          mkdir -p dist/linux-amd64/web dist/windows-amd64/web
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags='-s -w' -o dist/linux-amd64/nps ./cmd/nps
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -buildvcs=false -trimpath -ldflags='-s -w' -o dist/windows-amd64/nps.exe ./cmd/nps
+          cp -R web/static web/views dist/linux-amd64/web/
+          cp -R web/static web/views dist/windows-amd64/web/
+          cp dist/linux-amd64/nps dist/nps-linux-amd64
+          cp dist/windows-amd64/nps.exe dist/nps-windows-amd64.exe
+          tar -C dist/linux-amd64 -czf dist/nps-linux-amd64-with-web.tar.gz nps web
+          (cd dist/windows-amd64 && zip -qr ../nps-windows-amd64-with-web.zip nps.exe web)
+          (cd dist && sha256sum nps-linux-amd64 nps-linux-amd64-with-web.tar.gz nps-windows-amd64.exe nps-windows-amd64-with-web.zip > SHA256SUMS)
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+        run: |
+          set -eu
+          assets=(
+            dist/nps-linux-amd64
+            dist/nps-linux-amd64-with-web.tar.gz
+            dist/nps-windows-amd64.exe
+            dist/nps-windows-amd64-with-web.zip
+            dist/SHA256SUMS
+          )
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --generate-notes --title "$RELEASE_TAG"
+          fi
