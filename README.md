@@ -132,3 +132,39 @@ web/
 复制 `conf/nps.conf` 后，先把 `web_password=CHANGE_ME_BEFORE_START` 改成至少 12 个字符的
 唯一强密码。`auth_key` 默认留空（API 关闭）；需要 API 时请设置独立的长随机密钥。
 生产环境应启用 TLS，并把 Web 管理端限制在受信网络。
+
+## Docker
+
+`Dockerfile.nps` 构建 NPS-only 镜像，支持 `linux/amd64` 和 `linux/arm64`。容器内目录：
+
+```text
+/nps/nps       NPS 服务端
+/nps/web/      Web 静态资源与模板
+/nps/conf/     配置和持久化数据卷
+```
+
+示例：
+
+```bash
+docker run -d \
+  --name nps \
+  --restart unless-stopped \
+  --network host \
+  -v /宿主机/nps/conf:/nps/conf \
+  <Docker-Hub用户名>/nps:0.2.1
+```
+
+Linux 使用 `--network host` 时无需逐个映射动态隧道端口。使用 bridge 网络时，需要映射
+Bridge、Web、HTTP/HTTPS 代理端口以及所有隧道端口。
+
+GitHub Release 发布后，`.github/workflows/docker-publish.yml` 自动构建并推送版本标签和
+`latest`。仓库需配置：
+
+```text
+Repository variable: DOCKERHUB_USERNAME
+Repository variable: DOCKERHUB_REPOSITORY（可选，默认 nps）
+Repository secret:   DOCKERHUB_TOKEN
+```
+
+`DOCKERHUB_TOKEN` 必须使用具备目标仓库读写权限的 Docker Hub Personal Access Token，
+不要使用 Docker Hub 登录密码。
