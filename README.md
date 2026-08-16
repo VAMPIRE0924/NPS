@@ -163,7 +163,7 @@ Bridge、Web、HTTP/HTTPS 代理端口以及所有隧道端口。
 推送 dev                    验证后发布 vampirerune/nps:dev
 提交 dev -> main 的 PR      执行验收测试、vet、漏洞扫描和 Docker 构建检查
 在 main 提交上推送 v* 标签  自动创建 GitHub Release，上传 Linux/Windows amd64 包，
-                            并发布 vampirerune/nps:<VERSION> 与 :latest
+                            并发布 vampirerune/nps:<VERSION> 与 :main
 ```
 
 `main` 只接受通过验收检查的 PR，日常开发在 `dev` 完成。仓库需配置：

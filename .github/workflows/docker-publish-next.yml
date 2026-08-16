@@ -105,7 +105,7 @@ jobs:
                 exit 1
                 ;;
             esac
-            tags="${image}:${version},${image}:latest"
+            tags="${image}:${version},${image}:main"
           fi
           echo "image=$image" >> "$GITHUB_OUTPUT"
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
