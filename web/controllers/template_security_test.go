@@ -50,3 +50,18 @@ func TestListTemplatesSurviveStaleLanguageScript(t *testing.T) {
 		t.Fatal("task actions must use data attributes instead of inline JSON event handlers")
 	}
 }
+
+func TestFileTunnelRemainsAvailableInAddAndEditForms(t *testing.T) {
+	for _, name := range []string{
+		filepath.Join("..", "views", "index", "add.html"),
+		filepath.Join("..", "views", "index", "edit.html"),
+	} {
+		contents, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(contents), `<option value="file" langtag="scheme-file"></option>`) {
+			t.Fatalf("%s does not expose the supported file tunnel mode", name)
+		}
+	}
+}
