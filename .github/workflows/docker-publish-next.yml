@@ -2,7 +2,7 @@ name: Publish NPS Docker image
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -17,6 +17,7 @@ on:
         type: choice
         options:
           - dev
+          - main
           - release
 
 permissions:
@@ -39,7 +40,7 @@ jobs:
           fetch-depth: 0
 
       - name: Require release tags to point to main
-        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' || inputs.channel == 'release' }}
+        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' || inputs.channel == 'main' || inputs.channel == 'release' }}
         run: |
           git fetch origin main
           git merge-base --is-ancestor HEAD origin/main
@@ -83,7 +84,7 @@ jobs:
       - name: Resolve image tags
         id: release
         env:
-          CHANNEL: ${{ github.event_name == 'push' && github.ref_type == 'branch' && 'dev' || github.event_name == 'push' && github.ref_type == 'tag' && 'release' || inputs.channel }}
+          CHANNEL: ${{ github.event_name == 'push' && github.ref_type == 'branch' && github.ref_name || github.event_name == 'push' && github.ref_type == 'tag' && 'release' || inputs.channel }}
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
           DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
           RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
@@ -97,6 +98,8 @@ jobs:
           image="${DOCKERHUB_USERNAME}/${repository}"
           if [ "$CHANNEL" = "dev" ]; then
             tags="${image}:dev"
+          elif [ "$CHANNEL" = "main" ]; then
+            tags="${image}:main"
           else
             version="${RELEASE_TAG#v}"
             case "$version" in

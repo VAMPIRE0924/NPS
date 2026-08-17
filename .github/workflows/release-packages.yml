@@ -2,11 +2,12 @@ name: Publish NPS release packages
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing Git tag, for example v0.2.1
+        description: Git ref to build, for example main or v0.2.2
         required: true
         type: string
 
@@ -26,6 +27,7 @@ jobs:
           fetch-depth: 0
 
       - name: Require tag to point to main
+        if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v') }}
         run: |
           git fetch origin main
           git merge-base --is-ancestor HEAD origin/main
@@ -50,7 +52,21 @@ jobs:
           (cd dist/windows-amd64 && zip -qr ../nps-windows-amd64-with-web.zip nps.exe web)
           (cd dist && sha256sum nps-linux-amd64 nps-linux-amd64-with-web.tar.gz nps-windows-amd64.exe nps-windows-amd64-with-web.zip > SHA256SUMS)
 
+      - name: Upload main test packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nps-${{ github.ref_name }}-${{ github.sha }}
+          path: |
+            dist/nps-linux-amd64
+            dist/nps-linux-amd64-with-web.tar.gz
+            dist/nps-windows-amd64.exe
+            dist/nps-windows-amd64-with-web.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Create or update GitHub Release
+        if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v') }}
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
