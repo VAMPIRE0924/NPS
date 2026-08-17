@@ -42,4 +42,11 @@ func TestListTemplatesSurviveStaleLanguageScript(t *testing.T) {
 	if !strings.Contains(string(layout), "language.js?v=") {
 		t.Fatal("language.js URL has no deployment cache buster")
 	}
+	list, err := os.ReadFile(filepath.Join("..", "views", "index", "list.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(list), "onclick=\\\"submitform") || !strings.Contains(string(list), "data-task-action") {
+		t.Fatal("task actions must use data attributes instead of inline JSON event handlers")
+	}
 }
