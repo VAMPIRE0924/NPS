@@ -1,163 +1,55 @@
-# NPS
+# NPS 服务端增强版
 
-本仓库基于[NPS](https://github.com/ehang-io/nps)优化，兼容旧版NPC
+[![NPS acceptance](https://github.com/VAMPIRE0924/NPS/actions/workflows/acceptance.yml/badge.svg?branch=main)](https://github.com/VAMPIRE0924/NPS/actions/workflows/acceptance.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/vampirerune/nps)](https://hub.docker.com/r/vampirerune/nps)
+[![License](https://img.shields.io/github/license/VAMPIRE0924/NPS)](LICENSE)
 
-## 功能特性
+本仓库基于 [ehang-io/nps](https://github.com/ehang-io/nps) 维护 NPS 服务端增强版，重点改进
+任务模型、Web/API 权限边界、凭据落盘和自动发布。它不是上游官方仓库。
 
-- 每个功能面使用独立 ID 池。
-- 新增对象时永远取当前池内最小可用正整数 ID。
-- 删除 ID 后，下次新增可以自动复用被删除的小 ID。
-- TCP/UDP 不再作为两个后台功能维护，统一为一个端口转发规则。
-- 每个客户端自动绑定一个托管 SOCKS5 代理。
-- SOCKS5 代理默认关闭，只允许在管理端/API 中打开或关闭。
-- SOCKS5隧道无流量 30 分钟 -> 自动关闭 SOCKS 并持久化 Status=false
-- NPC 上报的 Basic 认证用户名和密码无效化，Basic 只由 NPS 服务端配置控制。
-- Web 写操作使用 CSRF 防护，API 使用带时间窗和 nonce 防重放的 HMAC-SHA256。
-- Web 管理密码至少 12 个字符，样例占位密码不能启动管理端。
-- 普通客户 Web 会话只能查看自己的 Client、Host、Tunnel、流量和运行状态，不获得管理 API 身份。
-- `nps.conf` 和持久化 JSON 中的凭据使用 AES-256-GCM 非明文落盘，Web/API 和 NPC 行为不变。
+现有原版或第三方 NPC 二进制及配置无需替换。发布物只包含 NPS 服务端；NPC 线协议、客户端本机
+与客户端内网目标访问、`LocalProxy` 和旧 `public_vkey` 临时配置模式保持兼容。
 
-## ID 规则
+## 核心能力
 
-独立 ID 池：
+- Client、Host 和每种隧道模式使用独立 ID 池，新增对象复用本池最小可用正整数。
+- 任务使用 `mode:id` 复合键，不同模式可同时拥有相同数字 ID。
+- `tcp`、`udp` 在服务端归一为一个 `portForward` 规则，同端口同时监听 TCP 和 UDP。
+- 每个可见 Client 自动绑定同 ID 的托管 SOCKS5，默认关闭，连续 30 分钟无流量后自动停止。
+- 管理 API 使用覆盖原始正文的 HMAC-SHA256、30 秒时间窗和 nonce 防重放；旧 MD5 API 已移除。
+- Web 写操作使用 POST 与 CSRF；登录成功轮换 Session ID，Cookie 使用安全属性。
+- 普通客户可以用本 Client 的 VerifyKey 登录 Web，但只能查看自己的对象，不获得管理 API 权限。
+- `nps.conf` 与持久化 JSON 中的凭据使用 AES-256-GCM 非明文落盘。
+- 现有 Web/API 查询仍读取进程内明文值，不改变 NPC、Web 登录或管理平台调用语义。
 
-```text
-Client.Id
-Host.Id
-portForward.Id
-socks5.Id
-httpProxy.Id
-secret.Id
-p2p.Id
-file.Id
-```
+详细变更见 [CHANGELOG.md](CHANGELOG.md)，安全边界见 [SECURITY.md](SECURITY.md)。
 
-任务内部唯一键为：
+## 权限边界
 
-```text
-mode:id
-```
+| 功能 | 管理员 Web / HMAC API | 普通客户 Web |
+| --- | --- | --- |
+| 查看 Client、Host、Tunnel | 全部 | 仅本 Client |
+| Host 路由 | 管理 | 管理自己的路由，不可设置服务端证书私钥路径 |
+| `secret` / `p2p` | 管理 | 管理自己的规则 |
+| 托管 SOCKS5 | 查询、启停 | 仅查询、启停自己的 SOCKS5 |
+| `portForward` / `httpProxy` / `file` | 管理 | 只读，不可新增、编辑、删除或启停 |
+| Client 状态与配置上报权限 | 管理 | 不可修改 |
+| 管理 API | 可用 | 不可用 |
 
-例如：
+这些限制只约束控制面，不限制 NPS/NPC 原有数据面访问客户端及客户端内网的能力。
 
-```text
-portForward:1
-socks5:1
-httpProxy:1
-```
+## Docker 快速开始
 
-这意味着不同功能可以同时拥有自己的 `ID=1`，互不冲突。
-
-## SOCKS5 托管规则
-
-新增客户端后，系统自动创建对应的 SOCKS5 代理：
-
-```text
-socks5.Id        = Client.Id
-socks5.Client.Id = Client.Id
-socks5.Port      = 10000 + Client.Id
-socks5.Remark    = Client.Remark
-```
-
-行为：
-
-```text
-新增客户端      -> 自动创建关闭状态的 SOCKS5
-修改客户端备注  -> 同步 SOCKS5 备注
-删除客户端      -> 删除对应 SOCKS5
-SOCKS5 页面     -> 只能查看和开关，不能新增/编辑/删除
-无流量 30 分钟  -> 自动关闭 SOCKS5 并持久化 Status=false
-```
-
-## 端口转发
-
-端口转发统一使用：
-
-```text
-portForward
-```
-
-一个 `portForward` 规则会同时监听同一个端口的 TCP 和 UDP。
-
-旧 NPC 配置中如果上报 `mode=tcp` 或 `mode=udp`，NPS 会在服务端归一为 `portForward`，但实际链路协议仍然保持 NPC 原有的 `CONN_TCP` / `CONN_UDP`，所以现有 NPC 不需要改。
-
-## Basic 认证
-
-Basic 认证用户名和密码只能由 NPS 服务端配置：
-
-```text
-Web/API 中的 u / p                       -> 有效
-NPC 配置中的 basic_username/basic_password -> NPS 入库前清空，不采信
-```
-
-Web 客户端列表支持单独或批量修改 Basic 认证用户名和密码；也可以调用 `/client/basic/` 接口完成同样操作。
-
-## 构建
-
-需要 Go 1.25 或更新版本；`go.mod` 固定使用带安全修复的 Go 1.26.6 工具链。
-
-Windows amd64:
-
-```powershell
-go build -trimpath -ldflags='-s -w' -o dist/windows_amd64/nps.exe ./cmd/nps
-```
-
-Linux amd64:
-
-```powershell
-$env:GOOS='linux'
-$env:GOARCH='amd64'
-go build -trimpath -ldflags='-s -w' -o dist/linux_amd64/nps ./cmd/nps
-Remove-Item Env:\GOOS
-Remove-Item Env:\GOARCH
-```
-
-部署时需要同时带上匹配源码版本的 `web/` 目录：
-
-```text
-nps
-conf/
-web/
-  static/
-  views/
-```
-
-只替换二进制时，请确认服务器上的 `web/` 目录已经同步到本仓库版本。
-
-## API 文档
-
-详见 [API.md](API.md)。旧版 MD5 查询参数认证已移除，升级现有 API 调用方时必须改用
-`X-NPS-Timestamp`、`X-NPS-Nonce` 和 `X-NPS-Signature` 请求头。
-
-## 首次启动与升级
-
-复制 `conf/nps.conf` 后，先把 `web_password=CHANGE_ME_BEFORE_START` 改成至少 12 个字符的
-唯一强密码。`auth_key` 默认留空（API 关闭）；需要 API 时请设置独立的长随机密钥。
-生产环境应启用 TLS，并把 Web 管理端限制在受信网络。
-
-首次启动会在 `conf/credential.key` 生成本地主密钥，并自动迁移旧明文凭据。升级、备份和迁移必须
-整体复制 `conf/`（包含 `credential.key`、`nps.conf`、JSON 和自有 TLS 证书/私钥）。密钥缺失或与密文
-不匹配时 NPS 会拒绝启动；不要删除旧密钥强行生成新密钥。
-
-## Docker
-
-`Dockerfile.nps` 构建 NPS-only 镜像，支持 `linux/amd64` 和 `linux/arm64`。容器内目录：
-
-```text
-/nps/nps       NPS 服务端
-/nps/web/      Web 静态资源与模板
-/nps/conf/     配置和持久化数据卷
-```
-
-镜像标签：
+镜像：[`vampirerune/nps`](https://hub.docker.com/r/vampirerune/nps)，支持
+`linux/amd64`、`linux/arm64`。
 
 | 标签 | 用途 |
 | --- | --- |
-| `main` | 通过验收并合入受保护 `main` 分支的最新稳定构建 |
-| `<VERSION>` | 固定正式版本，例如 `2.0.0`，生产环境推荐使用 |
-| `dev` | `dev` 分支测试构建，不建议生产使用 |
+| `main` | 受保护 `main` 分支通过验收后的稳定通道 |
+| `<VERSION>` | 固定正式版本，生产推荐使用 |
+| `dev` | 开发验收通道，不建议生产长期使用 |
 
-首次启动前先下载公开配置模板，并将占位管理密码替换为至少 12 位的唯一强密码：
+首次部署先准备配置。示例密码故意不可用，必须改成至少 12 个字符的唯一强密码：
 
 ```bash
 mkdir -p ./conf
@@ -167,47 +59,87 @@ curl -fsSL \
 chmod 600 ./conf/nps.conf
 ```
 
-示例：
+不使用 API 或公共配置模式时，保持 `auth_key=`、`public_vkey=` 为空。不要提交真实配置、JSON、
+证书私钥或 `credential.key`。
 
-```bash
-docker run -d \
-  --name nps \
-  --restart unless-stopped \
-  --network host \
-  -v /宿主机/nps/conf:/nps/conf \
-  vampirerune/nps:2.0.0
+Linux 推荐 host 网络，因为 NPS 会动态监听隧道端口：
+
+```yaml
+services:
+  nps:
+    image: vampirerune/nps:main
+    container_name: nps
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./conf:/nps/conf
 ```
-
-Linux 使用 `--network host` 时无需逐个映射动态隧道端口。使用 bridge 网络时，需要映射
-Bridge、Web、HTTP/HTTPS 代理端口以及所有隧道端口。
-
-也可直接使用仓库中的 `compose.yaml`：
 
 ```bash
 docker compose up -d
 docker compose logs -f nps
 ```
 
-生产环境建议固定版本号而不是跟随 `main`。升级前备份 `conf/`，再执行
-`docker compose pull && docker compose up -d`。更完整的 Docker 部署说明见
-[DOCKERHUB.md](DOCKERHUB.md)。
+bridge 网络必须显式映射 Web、NPC Bridge、HTTP/HTTPS 和每个隧道端口；端口转发规则需要同时
+映射 TCP 与 UDP。完整说明见 [DOCKERHUB.md](DOCKERHUB.md)。
 
-自动化分支与发布规则：
+## 首次启动、备份与迁移
 
-```text
-推送 dev                    验证后发布 vampirerune/nps:dev
-提交 dev -> main 的 PR      执行验收测试、vet、漏洞扫描和 Docker 构建检查
-在 main 提交上推送 v* 标签  自动创建 GitHub Release，上传 Linux/Windows amd64 包，
-                            并发布 vampirerune/nps:<VERSION> 与 :main
+第一次成功启动会生成权限为 `0600` 的 `conf/credential.key`，并把以下凭据迁移为
+`npsenc:v1:` 密文：
+
+- `nps.conf`：`web_password`、`auth_key`、`public_vkey`；
+- `clients.json`：VerifyKey、Web 密码、Basic 密码；
+- `tasks.json`、`hosts.json`：隧道、Host 和多账号凭据。
+
+密文不会在停止服务后恢复为明文。备份、迁移和恢复必须整体复制同一份 `conf/`；缺少或错配
+`credential.key` 时 NPS 会拒绝启动，防止静默损坏数据。
+
+```bash
+tar -C /path/to/nps -czf nps-conf-backup.tar.gz conf
 ```
 
-`main` 只接受通过验收检查的 PR，日常开发在 `dev` 完成。仓库需配置：
+升级前请先阅读 [UPGRADING.md](UPGRADING.md)。旧版本不能正确读取迁移后的密文，回滚必须同时
+恢复升级前的完整 `conf/` 备份。
+
+## 非 Docker 部署
+
+从 [Releases](https://github.com/VAMPIRE0924/NPS/releases) 下载对应平台包。NPS 不嵌入 Web
+资源，部署必须使用同一版本的完整单元：
 
 ```text
-Repository variable: DOCKERHUB_USERNAME
-Repository variable: DOCKERHUB_REPOSITORY（可选，默认 nps）
-Repository secret:   DOCKERHUB_TOKEN
+nps（Windows 为 nps.exe）
+conf/
+web/static/
+web/views/
 ```
 
-`DOCKERHUB_TOKEN` 必须使用具备目标仓库读写权限的 Docker Hub Personal Access Token，
-不要使用 Docker Hub 登录密码。
+本项目不要求重新构建、替换或改写 NPC。
+
+## API
+
+管理 API 只接受管理员 HMAC 身份。调用方必须同时判断 HTTP 状态码和历史 JSON 中的
+`status` / `code` 字段：
+
+- [API 合约](API.md)
+- [HMAC 签名示例](API_SIGNING_EXAMPLES.md)
+
+不要把 API 原始响应直接透传给前端；部分历史对象包含 VerifyKey 或密码字段，应先映射到自有 DTO
+并遮罩敏感值。
+
+## 源码构建
+
+项目要求 Go 1.25 及以上，并固定使用 Go 1.26.6 工具链。只构建 NPS 服务端：
+
+```bash
+go test ./bridge ./client ./cmd/nps ./lib/... ./server/... ./web/...
+CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags='-s -w' -o dist/nps ./cmd/nps
+```
+
+发布包还必须复制匹配版本的完整 `web/static` 与 `web/views`。正式 Release 和多架构镜像由
+GitHub Actions 从受保护 `main` 及其 `v*` 标签生成。
+
+## 上游与许可证
+
+本项目继续遵循仓库中的 [GPL-3.0 License](LICENSE)。原项目文档和 NPC 使用方式请参考
+[ehang-io/nps](https://github.com/ehang-io/nps)。
