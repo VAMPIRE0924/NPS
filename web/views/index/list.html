@@ -37,7 +37,10 @@
 
 <script>
     function escapeHtml(value) {
-        return window.npsEscapeHtml(value)
+        if (typeof window.npsEscapeHtml === 'function') {
+            return window.npsEscapeHtml(value)
+        }
+        return $('<div>').text(value == null ? '' : String(value)).html()
     }
     name = '{{.name}}:'.replace(/\s*/g,"")
     $('#langtag').attr('langtag','page-list' + name.replace(/:.*/,"")).next().text(name.split(":")[1])

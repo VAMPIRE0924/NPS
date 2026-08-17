@@ -73,7 +73,10 @@
 
 <script>
     function escapeHtml(value) {
-        return window.npsEscapeHtml(value)
+        if (typeof window.npsEscapeHtml === 'function') {
+            return window.npsEscapeHtml(value)
+        }
+        return $('<div>').text(value == null ? '' : String(value)).html()
     }
 
     function verifyKeyMaskHtml(value) {
