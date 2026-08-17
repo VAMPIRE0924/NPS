@@ -52,24 +52,34 @@ func DomainCheck(domain string) bool {
 
 // Check if the Request request is validated
 func CheckAuth(r *http.Request, user, passwd string) bool {
-	s := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
-	if len(s) != 2 {
-		s = strings.SplitN(r.Header.Get("Proxy-Authorization"), " ", 2)
-		if len(s) != 2 {
-			return false
+	requestUser, requestPassword, ok := GetAuth(r)
+	return ok && ConstantTimeEqual(requestUser, user) && ConstantTimeEqual(requestPassword, passwd)
+}
+
+func GetAuth(r *http.Request) (user, password string, ok bool) {
+	for _, header := range []string{"Proxy-Authorization", "Authorization"} {
+		s := strings.SplitN(r.Header.Get(header), " ", 2)
+		if len(s) != 2 || !strings.EqualFold(s[0], "Basic") {
+			continue
+		}
+		b, err := base64.StdEncoding.DecodeString(s[1])
+		if err != nil {
+			continue
+		}
+		pair := strings.SplitN(string(b), ":", 2)
+		if len(pair) == 2 {
+			return pair[0], pair[1], true
 		}
 	}
+	return "", "", false
+}
 
-	b, err := base64.StdEncoding.DecodeString(s[1])
-	if err != nil {
-		return false
+func StripProxyCredentials(r *http.Request) {
+	if r.Header.Get("Proxy-Authorization") != "" {
+		r.Header.Del("Proxy-Authorization")
+		return
 	}
-
-	pair := strings.SplitN(string(b), ":", 2)
-	if len(pair) != 2 {
-		return false
-	}
-	return ConstantTimeEqual(pair[0], user) && ConstantTimeEqual(pair[1], passwd)
+	r.Header.Del("Authorization")
 }
 
 func ConstantTimeEqual(left, right string) bool {
@@ -267,17 +277,23 @@ func FormatAddress(s string) string {
 
 // get address from the complete address
 func GetIpByAddr(addr string) string {
-	arr := strings.Split(addr, ":")
-	return arr[0]
+	addr = strings.TrimSpace(addr)
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return strings.Trim(host, "[]")
+	}
+	if strings.HasPrefix(addr, "[") && strings.HasSuffix(addr, "]") {
+		return strings.Trim(addr, "[]")
+	}
+	return addr
 }
 
 // get port from the complete address
 func GetPortByAddr(addr string) int {
-	arr := strings.Split(addr, ":")
-	if len(arr) < 2 {
+	_, port, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
 		return 0
 	}
-	p, err := strconv.Atoi(arr[1])
+	p, err := strconv.Atoi(port)
 	if err != nil {
 		return 0
 	}

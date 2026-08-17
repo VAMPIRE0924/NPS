@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"ehang.io/nps/lib/common"
 	"ehang.io/nps/lib/conn"
@@ -159,6 +160,7 @@ func (s *Sock5ModeServer) doConnect(c net.Conn, command uint8) {
 		_ = c.Close()
 		return
 	}
+	_ = c.SetDeadline(time.Time{})
 	// connect to host
 	addr := net.JoinHostPort(host, strconv.Itoa(int(port)))
 	var ltype string
@@ -215,6 +217,7 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 		s.sendReply(c, addrTypeNotSupported)
 		return
 	}
+	_ = c.SetDeadline(time.Time{})
 	logs.Warn(host, strconv.Itoa(int(port)))
 	replyAddr, err := net.ResolveUDPAddr("udp", s.task.ServerIp+":0")
 	if err != nil {
@@ -228,7 +231,11 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 		return
 	}
 	// reply the local addr
-	s.sendUdpReply(c, reply, succeeded, common.GetServerIpByClientIp(c.RemoteAddr().(*net.TCPAddr).IP))
+	remoteHost, _, splitErr := net.SplitHostPort(c.RemoteAddr().String())
+	if splitErr != nil {
+		remoteHost = c.RemoteAddr().String()
+	}
+	s.sendUdpReply(c, reply, succeeded, common.GetServerIpByClientIp(net.ParseIP(remoteHost)))
 	defer reply.Close()
 	// new a tunnel to client
 	link := conn.NewLink("udp5", "", s.task.Client.Cnf.Crypt, s.task.Client.Cnf.Compress, c.RemoteAddr().String(), false)
@@ -268,8 +275,12 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 		defer common.BufPoolUdp.Put(b)
 		defer c.Close()
 		for {
-			if err := binary.Read(target, binary.LittleEndian, &l); err != nil || l >= common.PoolSizeUdp || l <= 0 {
+			if err := binary.Read(target, binary.LittleEndian, &l); err != nil {
 				logs.Warn("read len bytes error", err.Error())
+				return
+			}
+			if l >= common.PoolSizeUdp || l <= 0 {
+				logs.Warn("invalid udp payload length", l)
 				return
 			}
 			if _, err := io.ReadFull(target, b[:int(l)]); err != nil {
@@ -302,6 +313,7 @@ func (s *Sock5ModeServer) handleUDP(c net.Conn) {
 
 // new conn
 func (s *Sock5ModeServer) handleConn(c net.Conn) {
+	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
 	buf := make([]byte, 2)
 	if _, err := io.ReadFull(c, buf); err != nil {
 		logs.Warn("negotiation err", err)
@@ -315,6 +327,11 @@ func (s *Sock5ModeServer) handleConn(c net.Conn) {
 		return
 	}
 	nMethods := buf[1]
+	if nMethods == 0 {
+		_, _ = c.Write([]byte{5, 0xff})
+		_ = c.Close()
+		return
+	}
 
 	methods := make([]byte, nMethods)
 	if _, err := io.ReadFull(c, methods); err != nil {
@@ -322,17 +339,34 @@ func (s *Sock5ModeServer) handleConn(c net.Conn) {
 		c.Close()
 		return
 	}
-	if (s.task.Client.Cnf.U != "" && s.task.Client.Cnf.P != "") || (s.task.MultiAccount != nil && len(s.task.MultiAccount.AccountMap) > 0) {
-		buf[1] = UserPassAuth
-		c.Write(buf)
+	requiresPassword := (s.task.Client.Cnf.U != "" && s.task.Client.Cnf.P != "") || (s.task.MultiAccount != nil && len(s.task.MultiAccount.AccountMap) > 0)
+	selected := byte(0)
+	if requiresPassword {
+		selected = UserPassAuth
+	}
+	offered := false
+	for _, method := range methods {
+		if method == selected {
+			offered = true
+			break
+		}
+	}
+	if !offered {
+		_, _ = c.Write([]byte{5, 0xff})
+		_ = c.Close()
+		return
+	}
+	buf[1] = selected
+	if _, err := c.Write(buf); err != nil {
+		_ = c.Close()
+		return
+	}
+	if requiresPassword {
 		if err := s.Auth(c); err != nil {
 			c.Close()
 			logs.Warn("Validation failed:", err)
 			return
 		}
-	} else {
-		buf[1] = 0
-		c.Write(buf)
 	}
 	s.handleRequest(c)
 }
@@ -340,7 +374,7 @@ func (s *Sock5ModeServer) handleConn(c net.Conn) {
 // socks5 auth
 func (s *Sock5ModeServer) Auth(c net.Conn) error {
 	header := []byte{0, 0}
-	if _, err := io.ReadAtLeast(c, header, 2); err != nil {
+	if _, err := io.ReadFull(c, header); err != nil {
 		return err
 	}
 	if header[0] != userAuthVersion {
@@ -348,15 +382,15 @@ func (s *Sock5ModeServer) Auth(c net.Conn) error {
 	}
 	userLen := int(header[1])
 	user := make([]byte, userLen)
-	if _, err := io.ReadAtLeast(c, user, userLen); err != nil {
+	if _, err := io.ReadFull(c, user); err != nil {
 		return err
 	}
-	if _, err := c.Read(header[:1]); err != nil {
+	if _, err := io.ReadFull(c, header[:1]); err != nil {
 		return errors.New("密码长度获取错误")
 	}
 	passLen := int(header[0])
 	pass := make([]byte, passLen)
-	if _, err := io.ReadAtLeast(c, pass, passLen); err != nil {
+	if _, err := io.ReadFull(c, pass); err != nil {
 		return err
 	}
 

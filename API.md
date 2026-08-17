@@ -58,6 +58,9 @@ HTTP 200；鉴权失败返回 HTTP 401，方法错误返回 HTTP 405。
 
 ## 2. API 鉴权
 
+本章接口全部是管理员管理 API。客户端账号和 VerifyKey Web 登录不会获得 API 身份；客户端页面
+使用受 CSRF 保护的 Web 会话，并由服务端强制限定为本 Client。不能把浏览器客户会话当作平台 API 凭据。
+
 ### 2.1 配置
 
 在 `nps.conf` 中设置独立的长随机密钥：
@@ -69,6 +72,9 @@ auth_key=<仅保存在生产密钥系统中的随机密钥>
 `auth_key` 非空时至少 32 个字符，建议使用密码学安全随机源生成 32 字节以上随机值。它不得与
 `web_password`、`public_vkey` 或任何 Client `VerifyKey` 复用。外部调用必须
 通过 TLS；不得把密钥、完整签名请求或包含密码的响应写入日志。
+
+运行后 `auth_key` 在 `nps.conf` 中以 `npsenc:v1:` 密文落盘，解密值只保留在进程内；管理 API
+对 Client VerifyKey、Web/Basic 等字段的既有查询结果不变。迁移必须连同 `conf/credential.key` 整体备份 `conf/`。
 
 ### 2.2 请求头
 

@@ -2,12 +2,58 @@ package file
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"ehang.io/nps/lib/common"
 )
+
+func TestHostRoutingPrefersExactThenWildcardAndLocation(t *testing.T) {
+	db := newTestDb(t)
+	client := newTestClient("client")
+	if err := db.NewClient(client); err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []*Host{
+		{Host: "*", Location: "/admin", Scheme: "http", Client: client, Target: &Target{TargetStr: "catchall"}},
+		{Host: "*.example.com", Location: "/", Scheme: "http", Client: client, Target: &Target{TargetStr: "wildcard"}},
+		{Host: "api.example.com", Location: "/", Scheme: "http", Client: client, Target: &Target{TargetStr: "exact-root"}},
+		{Host: "API.EXAMPLE.COM.", Location: "/admin", Scheme: "http", Client: client, Target: &Target{TargetStr: "exact-admin"}},
+	} {
+		if err := db.NewHost(host); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	request := httptest.NewRequest("GET", "http://api.example.com/admin/users", nil)
+	request.URL.Scheme = "http"
+	request.RequestURI = "/admin/users"
+	host, err := db.GetInfoByHost("API.EXAMPLE.COM.:80", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.Target.TargetStr != "exact-admin" {
+		t.Fatalf("unexpected exact host route %q", host.Target.TargetStr)
+	}
+
+	request = httptest.NewRequest("GET", "http://sub.example.com/", nil)
+	request.URL.Scheme = "http"
+	request.RequestURI = "/"
+	host, err = db.GetInfoByHost("sub.example.com", request)
+	if err != nil || host.Target.TargetStr != "wildcard" {
+		t.Fatalf("expected wildcard route, got %#v, %v", host, err)
+	}
+
+	request = httptest.NewRequest("GET", "http://evil-example.com/", nil)
+	request.URL.Scheme = "http"
+	request.RequestURI = "/admin"
+	host, err = db.GetInfoByHost("evil-example.com", request)
+	if err != nil || host.Target.TargetStr != "catchall" {
+		t.Fatalf("wildcard suffix crossed a DNS label boundary: %#v, %v", host, err)
+	}
+}
 
 func newTestDb(t *testing.T) *DbUtils {
 	t.Helper()
@@ -113,6 +159,18 @@ func TestClientIdReuseAndManagedSocks(t *testing.T) {
 	}
 	if _, err := db.GetTaskByMode(TaskModeSocks, reused.Id); err == nil {
 		t.Fatal("expected managed socks to be deleted with client")
+	}
+}
+
+func TestNewTaskRejectsUnsupportedMode(t *testing.T) {
+	db := newTestDb(t)
+	client := newTestClient("client")
+	if err := db.NewClient(client); err != nil {
+		t.Fatal(err)
+	}
+	task := newTestTask("unknown-mode", client)
+	if err := db.NewTask(task); err == nil {
+		t.Fatal("expected unsupported task mode to fail")
 	}
 }
 

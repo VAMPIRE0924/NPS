@@ -14,6 +14,8 @@
 - NPC 上报的 Basic 认证用户名和密码无效化，Basic 只由 NPS 服务端配置控制。
 - Web 写操作使用 CSRF 防护，API 使用带时间窗和 nonce 防重放的 HMAC-SHA256。
 - Web 管理密码至少 12 个字符，样例占位密码不能启动管理端。
+- 普通客户 Web 会话只能查看自己的 Client、Host、Tunnel、流量和运行状态，不获得管理 API 身份。
+- `nps.conf` 和持久化 JSON 中的凭据使用 AES-256-GCM 非明文落盘，Web/API 和 NPC 行为不变。
 
 ## ID 规则
 
@@ -132,6 +134,10 @@ web/
 复制 `conf/nps.conf` 后，先把 `web_password=CHANGE_ME_BEFORE_START` 改成至少 12 个字符的
 唯一强密码。`auth_key` 默认留空（API 关闭）；需要 API 时请设置独立的长随机密钥。
 生产环境应启用 TLS，并把 Web 管理端限制在受信网络。
+
+首次启动会在 `conf/credential.key` 生成本地主密钥，并自动迁移旧明文凭据。升级、备份和迁移必须
+整体复制 `conf/`（包含 `credential.key`、`nps.conf`、JSON 和自有 TLS 证书/私钥）。密钥缺失或与密文
+不匹配时 NPS 会拒绝启动；不要删除旧密钥强行生成新密钥。
 
 ## Docker
 

@@ -26,8 +26,7 @@ WORKDIR /nps
 
 COPY --from=builder /out/nps /nps/nps
 COPY web /nps/web
-COPY conf/nps.conf conf/clients.json conf/hosts.json conf/tasks.json \
-    conf/server.pem conf/server.key /nps/conf/
+COPY conf/nps.conf conf/clients.json conf/hosts.json conf/tasks.json /nps/conf/
 
 VOLUME ["/nps/conf"]
 STOPSIGNAL SIGTERM

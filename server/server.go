@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"ehang.io/nps/bridge"
@@ -673,7 +674,7 @@ func GetDashboardData() map[string]interface{} {
 	tcpCount := 0
 
 	file.GetDb().JsonDb.Clients.Range(func(key, value interface{}) bool {
-		tcpCount += int(value.(*file.Client).NowConn)
+		tcpCount += int(atomic.LoadInt32(&value.(*file.Client).NowConn))
 		return true
 	})
 	data["tcpCount"] = tcpCount
@@ -708,6 +709,71 @@ func GetDashboardData() map[string]interface{} {
 			data["sys"+strconv.Itoa(i+1)] = tool.ServerStatus[i*fg]
 		}
 	}
+	return data
+}
+
+// GetClientDashboardData returns the same dashboard shape while limiting all
+// account-derived counters and flow totals to one visible client.
+func GetClientDashboardData(clientID int) map[string]interface{} {
+	data := GetDashboardData()
+	client, err := file.GetDb().GetClient(clientID)
+	if err != nil || client.NoDisplay {
+		data["clientCount"] = 0
+		data["clientOnlineCount"] = 0
+		data["inletFlowCount"] = 0
+		data["exportFlowCount"] = 0
+		data["tcpCount"] = 0
+	} else {
+		in, out := client.Flow.Snapshot()
+		data["clientCount"] = 1
+		if client.IsConnect {
+			data["clientOnlineCount"] = 1
+		} else {
+			data["clientOnlineCount"] = 0
+		}
+		data["inletFlowCount"] = int(in)
+		data["exportFlowCount"] = int(out)
+		data["tcpCount"] = int(atomic.LoadInt32(&client.NowConn))
+	}
+
+	counts := map[string]int{
+		"portForwardCount": 0,
+		"socks5Count":      0,
+		"httpProxyCount":   0,
+		"secretCount":      0,
+		"p2pCount":         0,
+	}
+	file.GetDb().JsonDb.Tasks.Range(func(_, value interface{}) bool {
+		task, ok := value.(*file.Tunnel)
+		if !ok || task.Client == nil || task.Client.Id != clientID {
+			return true
+		}
+		switch task.Mode {
+		case file.TaskModePortForward:
+			counts["portForwardCount"]++
+		case file.TaskModeSocks:
+			counts["socks5Count"]++
+		case "httpProxy":
+			counts["httpProxyCount"]++
+		case "secret":
+			counts["secretCount"]++
+		case "p2p":
+			counts["p2pCount"]++
+		}
+		return true
+	})
+	for key, value := range counts {
+		data[key] = value
+	}
+	hostCount := 0
+	file.GetDb().JsonDb.Hosts.Range(func(_, value interface{}) bool {
+		host, ok := value.(*file.Host)
+		if ok && host.Client != nil && host.Client.Id == clientID {
+			hostCount++
+		}
+		return true
+	})
+	data["hostCount"] = hostCount
 	return data
 }
 

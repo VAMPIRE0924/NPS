@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net"
 	"strconv"
 )
@@ -185,20 +184,34 @@ func ReadUDPDatagram(r io.Reader) (*UDPDatagram, error) {
 	default:
 		return nil, errors.New("addr not support")
 	}
+	if hlen < n || hlen > len(b) {
+		return nil, errors.New("invalid udp header length")
+	}
 	dlen := int(header.Rsv)
 	if dlen == 0 { // standard SOCKS5 UDP datagram
-		extra, err := ioutil.ReadAll(r) // we assume no redundant data
+		remaining := len(b) - n
+		extra, err := io.ReadAll(io.LimitReader(r, int64(remaining+1)))
 		if err != nil {
 			return nil, err
 		}
+		if len(extra) > remaining {
+			return nil, errors.New("udp datagram is too large")
+		}
 		copy(b[n:], extra)
 		n += len(extra) // total length
+		if n < hlen {
+			return nil, io.ErrUnexpectedEOF
+		}
 		dlen = n - hlen // data length
 	} else { // extended feature, for UDP over TCP, using reserved field as data length
-		if _, err := io.ReadFull(r, b[n:hlen+dlen]); err != nil {
+		total := hlen + dlen
+		if total < n || total > len(b) {
+			return nil, errors.New("invalid udp payload length")
+		}
+		if _, err := io.ReadFull(r, b[n:total]); err != nil {
 			return nil, err
 		}
-		n = hlen + dlen
+		n = total
 	}
 	header.Addr = new(Addr)
 	if err := header.Addr.Decode(b[3:hlen]); err != nil {

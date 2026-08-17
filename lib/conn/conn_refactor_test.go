@@ -1,6 +1,7 @@
 package conn
 
 import (
+	"encoding/binary"
 	"net"
 	"testing"
 	"time"
@@ -53,5 +54,41 @@ func TestGetConfigInfoClearsClientReportedBasicAuth(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out sending config")
+	}
+}
+
+func TestConfigInfoRejectsMalformedJSON(t *testing.T) {
+	serverSide, clientSide := net.Pipe()
+	defer serverSide.Close()
+	defer clientSide.Close()
+	go func() {
+		_ = binary.Write(clientSide, binary.LittleEndian, int32(1))
+		_, _ = clientSide.Write([]byte("{"))
+	}()
+	if _, err := NewConn(serverSide).GetConfigInfo(); err == nil {
+		t.Fatal("expected malformed JSON to fail")
+	}
+}
+
+func TestTaskAndHostInfoRejectMissingRequiredObjects(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		read func(*Conn) error
+	}{
+		{name: "task", read: func(c *Conn) error { _, err := c.GetTaskInfo(); return err }},
+		{name: "host", read: func(c *Conn) error { _, err := c.GetHostInfo(); return err }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			serverSide, clientSide := net.Pipe()
+			defer serverSide.Close()
+			defer clientSide.Close()
+			go func() {
+				_ = binary.Write(clientSide, binary.LittleEndian, int32(2))
+				_, _ = clientSide.Write([]byte("{}"))
+			}()
+			if err := test.read(NewConn(serverSide)); err == nil {
+				t.Fatal("expected missing target to fail")
+			}
+		})
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"ehang.io/nps/bridge"
@@ -34,6 +33,14 @@ type httpServer struct {
 	addOrigin     bool
 	cache         *cache.Cache
 	cacheLen      int
+}
+
+type pendingHTTPResponse struct {
+	request   *http.Request
+	host      *file.Host
+	cacheKey  string
+	cacheable bool
+	cached    []byte
 }
 
 func NewHttp(bridge *bridge.Bridge, c *file.Tunnel, httpPort, httpsPort int, useCache bool, cacheLen int, addOrigin bool) *httpServer {
@@ -112,6 +119,7 @@ func (s *httpServer) handleTunneling(w http.ResponseWriter, r *http.Request) {
 	c, _, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
 	}
 	s.handleHttp(conn.NewConn(c), r)
 }
@@ -127,7 +135,7 @@ func (s *httpServer) handleHttp(c *conn.Conn, r *http.Request) {
 		targetAddr string
 		lenConn    *conn.LenConn
 		isReset    bool
-		wg         sync.WaitGroup
+		pending    pendingHTTPResponse
 	)
 	defer func() {
 		if connClient != nil {
@@ -156,6 +164,9 @@ reset:
 		logs.Warn("auth error", err, r.RemoteAddr)
 		return
 	}
+	if host.Client.Cnf != nil && host.Client.Cnf.U != "" && host.Client.Cnf.P != "" {
+		common.StripProxyCredentials(r)
+	}
 	if targetAddr, err = host.Target.GetRandomTarget(); err != nil {
 		logs.Warn(err.Error())
 		return
@@ -166,57 +177,68 @@ reset:
 		return
 	}
 	connClient = conn.GetConn(target, lk.Crypt, lk.Compress, host.Client.Rate, true)
-
-	wg.Add(1)
-	//read from inc-client
-	go func() {
-		isReset = false
-		defer connClient.Close()
-		defer func() {
-			wg.Done()
-			if !isReset {
-				c.Close()
-			}
-		}()
-		for {
-			if resp, err := http.ReadResponse(bufio.NewReader(connClient), r); err != nil || resp == nil || r == nil {
-				// if there got broken pipe, http.ReadResponse will get a nil
-				return
-			} else {
-				//if the cache is start and the response is in the extension,store the response to the cache list
-				if s.useCache && r.URL != nil && strings.Contains(r.URL.Path, ".") {
-					b, err := httputil.DumpResponse(resp, true)
-					if err != nil {
-						return
-					}
-					c.Write(b)
-					host.Flow.Add(0, int64(len(b)))
-					s.cache.Add(filepath.Join(host.Host, r.URL.Path), b)
-				} else {
-					lenConn := conn.NewLenConn(c)
-					if err := resp.Write(lenConn); err != nil {
-						logs.Error(err)
-						return
-					}
-					host.Flow.Add(0, int64(lenConn.Len))
+	activeConnClient := connClient
+	responseRequests := make(chan pendingHTTPResponse)
+	responseDone := make(chan struct{})
+	// Keep response ordering while using immutable per-request state. This also
+	// prevents a keep-alive request for one host from changing the accounting or
+	// cache key of an earlier response.
+	go func(upstream io.ReadWriteCloser, requests <-chan pendingHTTPResponse) {
+		defer close(responseDone)
+		defer upstream.Close()
+		reader := bufio.NewReader(upstream)
+		for pending := range requests {
+			if pending.cached != nil {
+				n, writeErr := c.Write(pending.cached)
+				if writeErr != nil {
+					return
 				}
+				pending.host.Flow.Add(0, int64(n))
+				continue
 			}
+			resp, readErr := http.ReadResponse(reader, pending.request)
+			if readErr != nil || resp == nil {
+				return
+			}
+			if pending.cacheable && httpResponseCacheable(resp) {
+				b, dumpErr := httputil.DumpResponse(resp, true)
+				if dumpErr != nil {
+					return
+				}
+				if _, writeErr := c.Write(b); writeErr != nil {
+					return
+				}
+				pending.host.Flow.Add(0, int64(len(b)))
+				s.cache.Add(pending.cacheKey, b)
+				continue
+			}
+			responseConn := conn.NewLenConn(c)
+			if writeErr := resp.Write(responseConn); writeErr != nil {
+				logs.Error(writeErr)
+				return
+			}
+			pending.host.Flow.Add(0, int64(responseConn.Len))
 		}
-	}()
+	}(activeConnClient, responseRequests)
 
+requestLoop:
 	for {
 		//if the cache start and the request is in the cache list, return the cache
-		if s.useCache {
-			if v, ok := s.cache.Get(filepath.Join(host.Host, r.URL.Path)); ok {
-				n, err := c.Write(v.([]byte))
-				if err != nil {
-					break
+		if s.useCache && httpRequestCacheable(r, host) {
+			if v, ok := s.cache.Get(httpCacheKey(host, r)); ok {
+				cached, valid := v.([]byte)
+				if !valid {
+					break requestLoop
+				}
+				select {
+				case responseRequests <- pendingHTTPResponse{host: host, cached: cached}:
+				case <-responseDone:
+					break requestLoop
 				}
 				logs.Trace("%s request, method %s, host %s, url %s, remote address %s, return cache", r.URL.Scheme, r.Method, r.Host, r.URL.Path, c.RemoteAddr().String())
-				host.Flow.Add(0, int64(n))
 				//if return cache and does not create a new conn with client and Connection is not set or close, close the connection.
 				if strings.ToLower(r.Header.Get("Connection")) == "close" || strings.ToLower(r.Header.Get("Connection")) == "" {
-					break
+					break requestLoop
 				}
 				goto readReq
 			}
@@ -225,33 +247,95 @@ reset:
 		//change the host and header and set proxy setting
 		common.ChangeHostAndHeader(r, host.HostChange, host.HeaderChange, c.Conn.RemoteAddr().String(), s.addOrigin)
 		logs.Trace("%s request, method %s, host %s, url %s, remote address %s, target %s", r.URL.Scheme, r.Method, r.Host, r.URL.Path, c.RemoteAddr().String(), lk.Host)
+		pending = pendingHTTPResponse{request: r, host: host}
+		pending.cacheable = s.useCache && httpRequestCacheable(r, host)
+		if pending.cacheable {
+			pending.cacheKey = httpCacheKey(host, r)
+		}
+		select {
+		case responseRequests <- pending:
+		case <-responseDone:
+			break requestLoop
+		}
 		//write
-		lenConn = conn.NewLenConn(connClient)
+		lenConn = conn.NewLenConn(activeConnClient)
 		if err := r.Write(lenConn); err != nil {
 			logs.Error(err)
-			break
+			break requestLoop
 		}
 		host.Flow.Add(int64(lenConn.Len), 0)
 
 	readReq:
 		//read req from connection
+		_ = c.SetReadDeadline(time.Now().Add(15 * time.Second))
 		if r, err = http.ReadRequest(bufio.NewReader(c)); err != nil {
-			break
+			break requestLoop
 		}
+		_ = c.SetReadDeadline(time.Time{})
 		r.URL.Scheme = scheme
 		//What happened ，Why one character less???
 		r.Method = resetReqMethod(r.Method)
 		if hostTmp, err := file.GetDb().GetInfoByHost(r.Host, r); err != nil {
 			logs.Notice("the url %s %s %s can't be parsed!", r.URL.Scheme, r.Host, r.RequestURI)
-			break
+			break requestLoop
 		} else if host != hostTmp {
 			host = hostTmp
 			isReset = true
-			connClient.Close()
+			close(responseRequests)
+			<-responseDone
 			goto reset
+		} else {
+			if err = s.auth(r, c, host.Client.Cnf.U, host.Client.Cnf.P); err != nil {
+				break requestLoop
+			}
+			if host.Client.Cnf != nil && host.Client.Cnf.U != "" && host.Client.Cnf.P != "" {
+				common.StripProxyCredentials(r)
+			}
 		}
 	}
-	wg.Wait()
+	close(responseRequests)
+	<-responseDone
+}
+
+func httpCacheKey(host *file.Host, r *http.Request) string {
+	path := r.URL.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	return strconv.Itoa(host.Id) + "\x00" + r.URL.Scheme + "\x00" + path + "?" + r.URL.RawQuery
+}
+
+func httpRequestCacheable(r *http.Request, host *file.Host) bool {
+	if r == nil || r.URL == nil || host == nil || r.Method != http.MethodGet || !strings.Contains(r.URL.Path, ".") {
+		return false
+	}
+	if host.HostChange != "" || host.HeaderChange != "" {
+		return false
+	}
+	if host.Client != nil && host.Client.Cnf != nil && host.Client.Cnf.U != "" && host.Client.Cnf.P != "" {
+		return false
+	}
+	for _, header := range []string{"Authorization", "Proxy-Authorization", "Cookie", "Range"} {
+		if r.Header.Get(header) != "" {
+			return false
+		}
+	}
+	cacheControl := strings.ToLower(r.Header.Get("Cache-Control"))
+	return !strings.Contains(cacheControl, "no-cache") &&
+		!strings.Contains(cacheControl, "no-store") &&
+		!strings.Contains(cacheControl, "max-age=0") &&
+		!strings.EqualFold(strings.TrimSpace(r.Header.Get("Pragma")), "no-cache")
+}
+
+func httpResponseCacheable(resp *http.Response) bool {
+	if resp == nil || resp.StatusCode != http.StatusOK || resp.Header.Get("Set-Cookie") != "" ||
+		resp.Header.Get("Vary") != "" || resp.Header.Get("Content-Range") != "" {
+		return false
+	}
+	cacheControl := strings.ToLower(resp.Header.Get("Cache-Control"))
+	return !strings.Contains(cacheControl, "private") &&
+		!strings.Contains(cacheControl, "no-cache") &&
+		!strings.Contains(cacheControl, "no-store")
 }
 
 func resetReqMethod(method string) string {

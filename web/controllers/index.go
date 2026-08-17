@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"strconv"
 	"time"
 
 	"ehang.io/nps/lib/file"
@@ -61,7 +62,11 @@ func cloneTunnelForUpdate(t *file.Tunnel) *file.Tunnel {
 
 func (s *IndexController) Index() {
 	s.Data["web_base_url"] = beego.AppConfig.String("web_base_url")
-	s.Data["data"] = server.GetDashboardData()
+	if clientID, ok := s.currentClientID(); ok {
+		s.Data["data"] = server.GetClientDashboardData(clientID)
+	} else {
+		s.Data["data"] = server.GetDashboardData()
+	}
 	s.SetInfo("dashboard")
 	s.display("index/index")
 }
@@ -118,16 +123,16 @@ func (s *IndexController) Host() {
 func (s *IndexController) All() {
 	s.Data["menu"] = "client"
 	s.Data["type"] = ""
-	clientId := s.getEscapeString("client_id")
-	s.Data["client_id"] = clientId
-	s.SetInfo("client id:" + clientId)
+	clientID := s.effectiveClientID(s.GetIntNoErr("client_id"))
+	s.Data["client_id"] = clientID
+	s.SetInfo("client id:" + strconv.Itoa(clientID))
 	s.display("index/list")
 }
 
 func (s *IndexController) GetTunnel() {
 	start, length := s.GetAjaxParams()
 	taskType := s.getTaskMode()
-	clientId := s.GetIntNoErr("client_id")
+	clientId := s.effectiveClientID(s.GetIntNoErr("client_id"))
 	list, cnt := server.GetTunnel(start, length, taskType, clientId, s.getEscapeString("search"))
 	s.AjaxTable(list, cnt, cnt, nil)
 }
@@ -139,7 +144,7 @@ func (s *IndexController) Add() {
 			return
 		}
 		s.Data["type"] = s.getTaskMode()
-		s.Data["client_id"] = s.getEscapeString("client_id")
+		s.Data["client_id"] = s.effectiveClientID(s.GetIntNoErr("client_id"))
 		s.SetInfo("add tunnel")
 		s.display()
 	} else {
@@ -164,7 +169,7 @@ func (s *IndexController) Add() {
 			s.AjaxErr("The port cannot be opened because it may has been occupied or is no longer allowed.")
 		}
 		var err error
-		if t.Client, err = file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
+		if t.Client, err = file.GetDb().GetClient(s.effectiveClientID(s.GetIntNoErr("client_id"))); err != nil {
 			s.AjaxErr(err.Error())
 		}
 		if t.Client.MaxTunnelNum != 0 && t.Client.GetTunnelNum() >= t.Client.MaxTunnelNum {
@@ -248,7 +253,7 @@ func (s *IndexController) Edit() {
 		} else {
 			oldTaskMode, oldTaskId := current.Mode, current.Id
 			t := cloneTunnelForUpdate(current)
-			if client, err := file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
+			if client, err := file.GetDb().GetClient(s.effectiveClientID(s.GetIntNoErr("client_id"))); err != nil {
 				s.AjaxErr("modified error,the client is not exist")
 				return
 			} else {
@@ -324,13 +329,13 @@ func (s *IndexController) Start() {
 
 func (s *IndexController) HostList() {
 	if s.Ctx.Request.Method == "GET" {
-		s.Data["client_id"] = s.getEscapeString("client_id")
+		s.Data["client_id"] = s.effectiveClientID(s.GetIntNoErr("client_id"))
 		s.Data["menu"] = "host"
 		s.SetInfo("host list")
 		s.display("index/hlist")
 	} else {
 		start, length := s.GetAjaxParams()
-		clientId := s.GetIntNoErr("client_id")
+		clientId := s.effectiveClientID(s.GetIntNoErr("client_id"))
 		list, cnt := file.GetDb().GetHost(start, length, clientId, s.getEscapeString("search"))
 		s.AjaxTable(list, cnt, cnt, nil)
 	}
@@ -361,7 +366,7 @@ func (s *IndexController) DelHost() {
 
 func (s *IndexController) AddHost() {
 	if s.Ctx.Request.Method == "GET" {
-		s.Data["client_id"] = s.getEscapeString("client_id")
+		s.Data["client_id"] = s.effectiveClientID(s.GetIntNoErr("client_id"))
 		s.Data["menu"] = "host"
 		s.SetInfo("add host")
 		s.display("index/hadd")
@@ -376,11 +381,13 @@ func (s *IndexController) AddHost() {
 			Location:     s.getEscapeString("location"),
 			Flow:         &file.Flow{},
 			Scheme:       s.getEscapeString("scheme"),
-			KeyFilePath:  s.getEscapeString("key_file_path"),
-			CertFilePath: s.getEscapeString("cert_file_path"),
+		}
+		if s.isAdminRequest() {
+			h.KeyFilePath = s.getEscapeString("key_file_path")
+			h.CertFilePath = s.getEscapeString("cert_file_path")
 		}
 		var err error
-		if h.Client, err = file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
+		if h.Client, err = file.GetDb().GetClient(s.effectiveClientID(s.GetIntNoErr("client_id"))); err != nil {
 			s.AjaxErr("add error the client can not be found")
 		}
 		if err := file.GetDb().NewHost(h); err != nil {
@@ -416,7 +423,7 @@ func (s *IndexController) EditHost() {
 					return
 				}
 			}
-			if client, err := file.GetDb().GetClient(s.GetIntNoErr("client_id")); err != nil {
+			if client, err := file.GetDb().GetClient(s.effectiveClientID(s.GetIntNoErr("client_id"))); err != nil {
 				s.AjaxErr("modified error,the client is not exist")
 			} else {
 				h.Client = client
@@ -428,8 +435,10 @@ func (s *IndexController) EditHost() {
 			h.Remark = s.getEscapeString("remark")
 			h.Location = s.getEscapeString("location")
 			h.Scheme = s.getEscapeString("scheme")
-			h.KeyFilePath = s.getEscapeString("key_file_path")
-			h.CertFilePath = s.getEscapeString("cert_file_path")
+			if s.isAdminRequest() {
+				h.KeyFilePath = s.getEscapeString("key_file_path")
+				h.CertFilePath = s.getEscapeString("cert_file_path")
+			}
 			h.Target.LocalProxy = s.GetBoolNoErr("local_proxy")
 			file.GetDb().JsonDb.StoreHostToJsonFile()
 		}

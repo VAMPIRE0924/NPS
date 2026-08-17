@@ -164,6 +164,7 @@ func (s *Bridge) verifySuccess(c *conn.Conn) {
 }
 
 func (s *Bridge) cliProcess(c *conn.Conn) {
+	c.SetReadDeadlineBySecond(10)
 	//read test flag
 	if _, err := c.GetShortContent(3); err != nil {
 		logs.Info("The client %s connect error", c.Conn.RemoteAddr(), err.Error())
@@ -462,7 +463,12 @@ loop:
 					c.WriteAddFail()
 					break loop
 				} else {
-					file.GetDb().NewHost(h)
+					if err := file.GetDb().NewHost(h); err != nil {
+						logs.Notice("add host error ", err.Error())
+						fail = true
+						c.WriteAddFail()
+						break loop
+					}
 					c.WriteAddOk()
 				}
 			} else {
@@ -475,6 +481,11 @@ loop:
 				break loop
 			} else {
 				t.Mode = file.CanonicalTaskMode(t.Mode)
+				if !file.IsSupportedTaskMode(t.Mode) {
+					fail = true
+					c.WriteAddFail()
+					break loop
+				}
 				if t.Mode == file.TaskModeSocks {
 					logs.Info("ignore client-reported socks5 task for client %d; socks5 is server-managed", client.Id)
 					c.WriteAddOk()

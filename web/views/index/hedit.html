@@ -34,7 +34,7 @@
                             </select>
                         </div>
                     </div>
-                {{if eq false .https_just_proxy}}
+                {{if and .isAdmin (eq false .https_just_proxy)}}
                     <div class="form-group" id="cert_file">
                         <label class="control-label font-bold" langtag="word-httpscert"></label>
                         <div class="col-sm-10">

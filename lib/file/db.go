@@ -94,6 +94,15 @@ func IsPortForwardMode(mode string) bool {
 	return CanonicalTaskMode(mode) == TaskModePortForward
 }
 
+func IsSupportedTaskMode(mode string) bool {
+	switch CanonicalTaskMode(mode) {
+	case TaskModePortForward, TaskModeSocks, "httpProxy", "secret", "p2p", "file":
+		return true
+	default:
+		return false
+	}
+}
+
 func ensureTunnelRuntime(t *Tunnel) {
 	if t.Flow == nil {
 		t.Flow = new(Flow)
@@ -185,6 +194,9 @@ func (s *DbUtils) NewTask(t *Tunnel) (err error) {
 		return errors.New("task mode is empty")
 	}
 	t.Mode = CanonicalTaskMode(t.Mode)
+	if !IsSupportedTaskMode(t.Mode) {
+		return errors.New("unsupported task mode")
+	}
 	s.JsonDb.idLock.Lock()
 	defer s.JsonDb.idLock.Unlock()
 	s.JsonDb.Tasks.Range(func(key, value interface{}) bool {
@@ -226,6 +238,9 @@ func (s *DbUtils) UpdateTaskByModeId(oldMode string, oldId int, t *Tunnel) error
 	}
 	oldMode = CanonicalTaskMode(oldMode)
 	t.Mode = CanonicalTaskMode(t.Mode)
+	if !IsSupportedTaskMode(oldMode) || !IsSupportedTaskMode(t.Mode) {
+		return errors.New("unsupported task mode")
+	}
 	if oldMode == TaskModeSocks || t.Mode == TaskModeSocks {
 		return errors.New("socks5 task is managed by client and cannot be modified")
 	}
@@ -320,9 +335,10 @@ func (s *DbUtils) DelHost(id int) error {
 
 func (s *DbUtils) IsHostExist(h *Host) bool {
 	var exist bool
+	wantedHost := normalizeHostName(h.Host)
 	s.JsonDb.Hosts.Range(func(key, value interface{}) bool {
 		v := value.(*Host)
-		if v.Id != h.Id && v.Host == h.Host && h.Location == v.Location && (v.Scheme == "all" || v.Scheme == h.Scheme) {
+		if v.Id != h.Id && normalizeHostName(v.Host) == wantedHost && h.Location == v.Location && (v.Scheme == "all" || h.Scheme == "all" || v.Scheme == h.Scheme) {
 			exist = true
 			return false
 		}
@@ -647,9 +663,8 @@ func (s *DbUtils) GetHostById(id int) (h *Host, err error) {
 
 // get key by host from x
 func (s *DbUtils) GetInfoByHost(host string, r *http.Request) (h *Host, err error) {
-	var hosts []*Host
-	//Handling Ported Access
-	host = common.GetIpByAddr(host)
+	host = normalizeHostName(host)
+	bestHostRank, bestHostSpecificity, bestLocationLength := -1, -1, -1
 	s.JsonDb.Hosts.Range(func(key, value interface{}) bool {
 		v := value.(*Host)
 		if v.IsClose {
@@ -660,32 +675,61 @@ func (s *DbUtils) GetInfoByHost(host string, r *http.Request) (h *Host, err erro
 		if v.Scheme != "all" && v.Scheme != r.URL.Scheme {
 			return true
 		}
-		tmpHost := v.Host
-		if strings.Contains(tmpHost, "*") {
-			tmpHost = strings.Replace(tmpHost, "*", "", -1)
-			if strings.Contains(host, tmpHost) {
-				hosts = append(hosts, v)
-			}
-		} else if v.Host == host {
-			hosts = append(hosts, v)
+		hostRank, hostSpecificity, matched := matchConfiguredHost(normalizeHostName(v.Host), host)
+		if !matched {
+			return true
+		}
+		location := v.Location
+		if location == "" {
+			location = "/"
+		}
+		if !strings.HasPrefix(r.RequestURI, location) {
+			return true
+		}
+		locationLength := len(location)
+		if h == nil || hostRank > bestHostRank ||
+			(hostRank == bestHostRank && hostSpecificity > bestHostSpecificity) ||
+			(hostRank == bestHostRank && hostSpecificity == bestHostSpecificity && locationLength > bestLocationLength) ||
+			(hostRank == bestHostRank && hostSpecificity == bestHostSpecificity && locationLength == bestLocationLength && v.Id < h.Id) {
+			h = v
+			bestHostRank = hostRank
+			bestHostSpecificity = hostSpecificity
+			bestLocationLength = locationLength
 		}
 		return true
 	})
-
-	for _, v := range hosts {
-		//If not set, default matches all
-		if v.Location == "" {
-			v.Location = "/"
-		}
-		if strings.Index(r.RequestURI, v.Location) == 0 {
-			if h == nil || (len(v.Location) > len(h.Location)) {
-				h = v
-			}
-		}
-	}
 	if h != nil {
 		return
 	}
 	err = errors.New("The host could not be parsed")
 	return
+}
+
+func normalizeHostName(host string) string {
+	host = common.GetIpByAddr(strings.TrimSpace(host))
+	host = strings.Trim(host, "[]")
+	return strings.TrimSuffix(strings.ToLower(host), ".")
+}
+
+func matchConfiguredHost(configured, requested string) (rank, specificity int, matched bool) {
+	if configured == requested {
+		return 3, len(configured), true
+	}
+	if configured == "*" {
+		return 0, 0, true
+	}
+	if strings.HasPrefix(configured, "*.") {
+		suffix := strings.TrimPrefix(configured, "*.")
+		if suffix != "" && requested != suffix && strings.HasSuffix(requested, "."+suffix) {
+			return 2, len(suffix), true
+		}
+		return 0, 0, false
+	}
+	if strings.Contains(configured, "*") {
+		legacyFragment := strings.ReplaceAll(configured, "*", "")
+		if legacyFragment != "" && strings.Contains(requested, legacyFragment) {
+			return 1, len(legacyFragment), true
+		}
+	}
+	return 0, 0, false
 }

@@ -114,6 +114,9 @@ func (s *Conn) ReadLen(cLen int, buf []byte) (int, error) {
 		return 0, errors.New("长度错误" + strconv.Itoa(cLen))
 	}
 	if n, err := io.ReadFull(s, buf[:cLen]); err != nil || n != cLen {
+		if err == nil {
+			err = io.ErrUnexpectedEOF
+		}
 		return n, errors.New("Error reading specified length " + err.Error())
 	}
 	return cLen, nil
@@ -199,7 +202,12 @@ func (s *Conn) GetHealthInfo() (info string, status bool, err error) {
 
 // get task info
 func (s *Conn) GetHostInfo() (h *file.Host, err error) {
-	err = s.getInfo(&h)
+	if err = s.getInfo(&h); err != nil {
+		return nil, err
+	}
+	if h == nil || h.Target == nil {
+		return nil, errors.New("receive host config error")
+	}
 	h.Flow = new(file.Flow)
 	h.NoStore = true
 	return
@@ -229,7 +237,12 @@ func (s *Conn) GetConfigInfo() (c *file.Client, err error) {
 
 // get task info
 func (s *Conn) GetTaskInfo() (t *file.Tunnel, err error) {
-	err = s.getInfo(&t)
+	if err = s.getInfo(&t); err != nil {
+		return nil, err
+	}
+	if t == nil || t.Target == nil {
+		return nil, errors.New("receive task config error")
+	}
 	t.NoStore = true
 	t.Flow = new(file.Flow)
 	return
@@ -271,7 +284,9 @@ func (s *Conn) getInfo(t interface{}) (err error) {
 	} else if _, err = s.ReadLen(l, buf); err != nil {
 		return
 	} else {
-		json.Unmarshal(buf[:l], &t)
+		if err = json.Unmarshal(buf[:l], t); err != nil {
+			return errors.New("invalid config JSON: " + err.Error())
+		}
 	}
 	return
 }

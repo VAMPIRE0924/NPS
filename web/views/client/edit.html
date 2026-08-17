@@ -88,6 +88,7 @@
                         </div>
                     </div>
                 {{end}}
+                {{if eq true .isAdmin}}
                     <div class="form-group" id="config_conn_allow">
                         <label class="control-label font-bold" langtag="word-connectbyconfig"></label>
                         <div class="col-sm-10">
@@ -97,6 +98,7 @@
                             </select>
                         </div>
                     </div>
+                {{end}}
                     <div class="form-group" id="compress">
                         <label class="control-label font-bold" langtag="word-compress"></label>
                         <div class="col-sm-10">

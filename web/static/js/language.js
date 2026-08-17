@@ -1,4 +1,8 @@
 (function ($) {
+	window.npsEscapeHtml = function (value) {
+		return $('<div>').text(value == null ? '' : String(value)).html();
+	};
+
 	$(function () {
 		if (window.nps && window.nps.xsrf_token) {
 			$.ajaxSetup({headers: {"X-Xsrftoken": window.nps.xsrf_token}});
