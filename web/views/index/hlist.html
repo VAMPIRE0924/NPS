@@ -34,6 +34,12 @@
 </div>
 
 <script>
+    function escapeHtml(value) {
+        if (typeof window.npsEscapeHtml === 'function') {
+            return window.npsEscapeHtml(value)
+        }
+        return $('<div>').text(value == null ? '' : String(value)).html()
+    }
     /*bootstrap table*/
     $('#table').bootstrapTable({
         toolbar: "#toolbar",
@@ -65,12 +71,12 @@
                     + '<b langtag="word-inletflow"></b>: ' + changeunit(row.Flow.InletFlow) + '&emsp;'
                     + '<b langtag="word-crypt"></b>: ' + row.Client.Cnf.Crypt + '&emsp;'
                     + '<b langtag="word-compress"></b>: ' + row.Client.Cnf.Compress + '&emsp;'
-                    + '<b langtag="word-basicusername"></b>: ' + row.Client.Cnf.U + '&emsp;'
-                    + '<b langtag="word-basicpassword"></b>: ' + row.Client.Cnf.P + '&emsp;<br/><br>'
-                    + '<b langtag="word-httpscert"></b>: ' + row.CertFilePath + '&emsp;'
-                    + '<b langtag="word-httpskey"></b>: ' + row.KeyFilePath + '&emsp;<br/><br>'
-                    + '<b langtag="word-requestheader"></b>: ' + row.HeaderChange + '&emsp;<br/><br>'
-                    + '<b langtag="word-requesthost"></b>: ' + row.HostChange + '&emsp;'
+                    + '<b langtag="word-basicusername"></b>: ' + escapeHtml(row.Client.Cnf.U) + '&emsp;'
+                    + '<b langtag="word-basicpassword"></b>: ' + escapeHtml(row.Client.Cnf.P) + '&emsp;<br/><br>'
+                    + '<b langtag="word-httpscert"></b>: ' + escapeHtml(row.CertFilePath) + '&emsp;'
+                    + '<b langtag="word-httpskey"></b>: ' + escapeHtml(row.KeyFilePath) + '&emsp;<br/><br>'
+                    + '<b langtag="word-requestheader"></b>: ' + escapeHtml(row.HeaderChange) + '&emsp;<br/><br>'
+                    + '<b langtag="word-requesthost"></b>: ' + escapeHtml(row.HostChange) + '&emsp;'
         },
         //表格的列
         columns: [
@@ -93,13 +99,15 @@
                 field: 'Remark',//域值
                 title: '<span langtag="word-remark"></span>',//标题
                 halign: 'center',
-                visible: true//false表示不显示
+                visible: true,//false表示不显示
+                formatter: function (value) { return escapeHtml(value) }
             },
             {
                 field: 'Host',//域值
                 title: '<span langtag="word-host"></span>',//标题
                 halign: 'center',
-                visible: true//false表示不显示
+                visible: true,//false表示不显示
+                formatter: function (value) { return escapeHtml(value) }
             },
             {
                 field: 'Scheme',//域值
@@ -107,7 +115,7 @@
                 halign: 'center',
                 visible: true,//false表示不显示
                 formatter: function (value, row, index) {
-                    return '<span langtag="word-' +value+ '"></span>'
+                    return '<span langtag="word-' + escapeHtml(value) + '"></span>'
                 }
             },
             {
@@ -116,14 +124,15 @@
                 halign: 'center',
                 visible: true,//false表示不显示
                 formatter: function (value, row, index) {
-                    return row.Target.TargetStr
+                    return escapeHtml(row.Target.TargetStr)
                 }
             },
             {
                 field: 'Location',//域值
                 title: '<span langtag="word-location"></span>',//标题
                 halign: 'center',
-                visible: true//false表示不显示
+                visible: true,//false表示不显示
+                formatter: function (value) { return escapeHtml(value) }
             },
             {
                 field: '',//域值
@@ -132,9 +141,9 @@
                 halign: 'center',
                 visible: true,//false表示不显示
                 formatter: function (value, row, index) {
-                    hosturl = ((row.Scheme == 'http' ) ? 'http://' : 'https://') + row.Host + row.Location
+                    var hosturl = ((row.Scheme == 'http' ) ? 'http://' : 'https://') + row.Host + row.Location
                     if (row.Client.IsConnect) {
-                        return '<a href="' + hosturl + '" target="_blank"><span class="badge badge-primary" langtag="word-online"></span></a>'
+                        return '<a href="' + escapeHtml(hosturl) + '" target="_blank" rel="noopener noreferrer"><span class="badge badge-primary" langtag="word-online"></span></a>'
                     } else {
                         return '<span class="badge badge-badge" langtag="word-offline"></span>'
                     }
@@ -148,9 +157,9 @@
                 visible: true,//false表示不显示
                 formatter: function (value, row, index) {
                     btn_group = '<div class="btn-group">'
-                    btn_group += "<a onclick=\"submitform('delete', '{{.web_base_url}}/index/delhost', {'id':" + row.Id
+                    btn_group += "<a onclick=\"submitform('delete', '{{.web_base_url}}/index/delhost', {'id':" + Number(row.Id)
                     btn_group += '})" class="btn btn-outline btn-danger"><i class="fa fa-trash"></i></a>'
-                    btn_group += '<a href="{{.web_base_url}}/index/edithost?id=' + row.Id
+                    btn_group += '<a href="{{.web_base_url}}/index/edithost?id=' + Number(row.Id)
                     btn_group += '" class="btn btn-outline btn-success"><i class="fa fa-edit"></i></a></div>'
                     return btn_group
                 }

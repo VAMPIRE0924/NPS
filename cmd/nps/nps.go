@@ -39,8 +39,18 @@ func main() {
 		common.PrintVersion()
 		return
 	}
-	if err := beego.LoadAppConfig("ini", filepath.Join(common.GetRunPath(), "conf", "nps.conf")); err != nil {
+	configPath := filepath.Join(common.GetRunPath(), "conf", "nps.conf")
+	if err := beego.LoadAppConfig("ini", configPath); err != nil {
 		log.Fatalln("load config file error", err.Error())
+	}
+	configSecrets, err := file.ProtectAppConfig(common.GetRunPath(), configPath)
+	if err != nil {
+		log.Fatalln("protect config credentials error", err.Error())
+	}
+	for key, value := range configSecrets {
+		if err := beego.AppConfig.Set(key, value); err != nil {
+			log.Fatalln("load protected config credential error", err.Error())
+		}
 	}
 	common.InitPProfFromFile()
 	if level = beego.AppConfig.String("log_level"); level == "" {

@@ -1,14 +1,14 @@
 # NPS 重构版 API 说明
 
-本文是管理平台适配 NPS 的当前 HTTP 合约。源码以 `workspace/nps-dev/` 为准。
+本文是管理平台适配本仓库 NPS 服务端的当前 HTTP 合约，源码与测试以本仓库为准。
 
 版本边界：
 
-- `v0.2.2` 覆盖发布已在生产通过 HMAC 与完整功能复验；新主版本基线
-  `v2.0.0` 使用相同的已验证实现，包含 HMAC-SHA256、复合任务 ID 和
-  `POST /index/socksstatus/`。
-- 2026-08-17 生产验收发现已发布构建在 Beego 解析表单后误按空正文验签。
-  `v0.2.2` 覆盖发布已修复为按实际发送的原始正文字节验签，并已在生产确认。
+- `v2.0.0` 是当前正式版本基线；`Unreleased` 记录的下一次 `main` 候选继续使用同一套
+  HMAC-SHA256、复合任务 ID 和 `POST /index/socksstatus/` 合约。
+- 签名按实际发送的原始正文字节计算；空正文伪签名、过期时间戳、nonce 重放和错误签名均拒绝。
+- 管理 API 已完成 Client、Host、五类可手工创建隧道，以及随 Client 自动创建的托管 SOCKS 的
+  生产生命周期回归。
 
 ## 1. 基础约定
 
@@ -58,6 +58,9 @@ HTTP 200；鉴权失败返回 HTTP 401，方法错误返回 HTTP 405。
 
 ## 2. API 鉴权
 
+本章接口全部是管理员管理 API。客户端账号和 VerifyKey Web 登录不会获得 API 身份；客户端页面
+使用受 CSRF 保护的 Web 会话，并由服务端强制限定为本 Client。不能把浏览器客户会话当作平台 API 凭据。
+
 ### 2.1 配置
 
 在 `nps.conf` 中设置独立的长随机密钥：
@@ -69,6 +72,9 @@ auth_key=<仅保存在生产密钥系统中的随机密钥>
 `auth_key` 非空时至少 32 个字符，建议使用密码学安全随机源生成 32 字节以上随机值。它不得与
 `web_password`、`public_vkey` 或任何 Client `VerifyKey` 复用。外部调用必须
 通过 TLS；不得把密钥、完整签名请求或包含密码的响应写入日志。
+
+运行后 `auth_key` 在 `nps.conf` 中以 `npsenc:v1:` 密文落盘，解密值只保留在进程内；管理 API
+对 Client VerifyKey、Web/Basic 等字段的既有查询结果不变。迁移必须连同 `conf/credential.key` 整体备份 `conf/`。
 
 ### 2.2 请求头
 
@@ -226,7 +232,7 @@ local_proxy    1/0
 - 删除后 ID 可在同一类型池内复用。
 - 创建失败不占用 ID。
 
-## 6. 托管 SOCKS 状态 API（开发版新增）
+## 6. 托管 SOCKS 状态 API
 
 ### 6.1 请求
 

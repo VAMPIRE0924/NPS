@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -79,6 +80,8 @@ func (s *WebServer) Start() error {
 	}
 	beego.BConfig.WebConfig.Session.SessionOn = true
 	beego.BConfig.WebConfig.EnableXSRF = true
+	webTLS := beego.AppConfig.String("web_open_ssl") == "true"
+	beego.BConfig.Listen.EnableHTTPS = webTLS
 	xsrfKey := sha256.Sum256([]byte("nps-xsrf:" + username + ":" + password + ":" + beego.AppConfig.String("auth_key")))
 	beego.BConfig.WebConfig.XSRFKey = hex.EncodeToString(xsrfKey[:])
 	beego.SetStaticPath(beego.AppConfig.String("web_base_url")+"/static", filepath.Join(common.GetRunPath(), "web", "static"))
@@ -88,14 +91,14 @@ func (s *WebServer) Start() error {
 	if l, err = connection.GetWebManagerListener(); err == nil {
 		beego.InitBeforeHTTPRun()
 		webHTTPServer := &http.Server{
-			Handler:           beego.BeeApp.Handlers,
+			Handler:           newWebSecurityHandler(beego.BeeApp.Handlers, webTLS),
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       30 * time.Second,
 			WriteTimeout:      60 * time.Second,
 			IdleTimeout:       120 * time.Second,
 			MaxHeaderBytes:    1 << 20,
 		}
-		if beego.AppConfig.String("web_open_ssl") == "true" {
+		if webTLS {
 			keyPath := beego.AppConfig.String("web_key_file")
 			certPath := beego.AppConfig.String("web_cert_file")
 			err = webHTTPServer.ServeTLS(l, certPath, keyPath)
@@ -169,6 +172,16 @@ func ProcessHttp(c *conn.Conn, s *TunnelModeServer) error {
 	}
 	if err := s.auth(r, c, s.task.Client.Cnf.U, s.task.Client.Cnf.P); err != nil {
 		return err
+	}
+	if s.task.Client.Cnf != nil && s.task.Client.Cnf.U != "" && s.task.Client.Cnf.P != "" {
+		common.StripProxyCredentials(r)
+	}
+	if r.Method != "CONNECT" {
+		var sanitized bytes.Buffer
+		if err := r.WriteProxy(&sanitized); err != nil {
+			return err
+		}
+		rb = sanitized.Bytes()
 	}
 	return s.DealClient(c, s.task.Client, addr, rb, common.CONN_TCP, nil, s.task.Flow, s.task.Target.LocalProxy)
 }

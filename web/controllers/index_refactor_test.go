@@ -33,3 +33,12 @@ func TestSocksStatusAuthorizationCannotUseAnotherTaskMode(t *testing.T) {
 		t.Fatalf("other task actions must preserve their requested mode, got %s", got)
 	}
 }
+
+func TestEditAuthorizationUsesStoredCompositeTaskMode(t *testing.T) {
+	if got := authorizationModeForRequest("edit", "secret", file.TaskModePortForward); got != file.TaskModePortForward {
+		t.Fatalf("edit authorization used caller-selected new mode instead of old object key: %s", got)
+	}
+	if !isHostAuthorizationAction("edithost") || isHostAuthorizationAction("http") {
+		t.Fatal("host action classification is ambiguous")
+	}
+}

@@ -1,19 +1,22 @@
 package install
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"ehang.io/nps/lib/common"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/c4milo/unpackit"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Keep it in sync with the template from service_sysv_linux.go file
@@ -135,7 +138,11 @@ WantedBy=multi-user.target
 `
 
 func UpdateNps() {
-	destPath := downloadLatest()
+	destPath, err := downloadLatest()
+	if err != nil {
+		log.Println("update failed:", err)
+		return
+	}
 	//复制文件到对应目录
 	copyStaticFile(destPath, "nps")
 	fmt.Println("Update completed, please restart")
@@ -149,18 +156,16 @@ type release struct {
 	TagName string `json:"tag_name"`
 }
 
-func downloadLatest() string {
+func downloadLatest() (string, error) {
 	// get version
-	data, err := http.Get("https://api.github.com/repos/VAMPIRE0924/NPS/releases/latest")
+	apiBody, err := downloadReleaseFile("https://api.github.com/repos/VAMPIRE0924/NPS/releases/latest", 1<<20)
 	if err != nil {
-		log.Fatal(err.Error())
-	}
-	b, err := ioutil.ReadAll(data.Body)
-	if err != nil {
-		log.Fatal(err)
+		return "", err
 	}
 	rl := new(release)
-	json.Unmarshal(b, &rl)
+	if err := json.Unmarshal(apiBody, &rl); err != nil || rl.TagName == "" {
+		return "", errors.New("invalid latest release metadata")
+	}
 	version := rl.TagName
 	fmt.Println("the latest version is", version)
 	filename := fmt.Sprintf("nps-%s-%s-with-web.tar.gz", runtime.GOOS, runtime.GOARCH)
@@ -168,21 +173,83 @@ func downloadLatest() string {
 		filename = fmt.Sprintf("nps-%s-%s-with-web.zip", runtime.GOOS, runtime.GOARCH)
 	}
 	// download latest package
-	downloadUrl := fmt.Sprintf("https://github.com/VAMPIRE0924/NPS/releases/download/%s/%s", version, filename)
-	fmt.Println("download package from ", downloadUrl)
-	resp, err := http.Get(downloadUrl)
+	downloadURL := fmt.Sprintf("https://github.com/VAMPIRE0924/NPS/releases/download/%s/%s", version, filename)
+	fmt.Println("download package from ", downloadURL)
+	archive, err := downloadReleaseFile(downloadURL, 512<<20)
 	if err != nil {
-		log.Fatal(err.Error())
+		return "", err
 	}
-	destPath, err := unpackit.Unpack(resp.Body, "")
+	checksumsURL := fmt.Sprintf("https://github.com/VAMPIRE0924/NPS/releases/download/%s/SHA256SUMS", version)
+	checksums, err := downloadReleaseFile(checksumsURL, 1<<20)
 	if err != nil {
-		log.Fatal(err)
+		return "", err
+	}
+	if err := verifyReleaseChecksum(filename, archive, string(checksums)); err != nil {
+		return "", err
+	}
+	destPath, err := unpackit.Unpack(bytes.NewReader(archive), "")
+	if err != nil {
+		return "", err
 	}
 	destPath = strings.Replace(destPath, "/web", "", -1)
 	destPath = strings.Replace(destPath, `\web`, "", -1)
 	destPath = strings.Replace(destPath, "/views", "", -1)
 	destPath = strings.Replace(destPath, `\views`, "", -1)
-	return destPath
+	return destPath, nil
+}
+
+var releaseHTTPClient = &http.Client{
+	Timeout: 2 * time.Minute,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 || req.URL.Scheme != "https" {
+			return errors.New("unsafe release download redirect")
+		}
+		return nil
+	},
+}
+
+func downloadReleaseFile(rawURL string, maxBytes int64) ([]byte, error) {
+	if !strings.HasPrefix(rawURL, "https://") {
+		return nil, errors.New("release download requires HTTPS")
+	}
+	resp, err := releaseHTTPClient.Get(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download %s returned %s", rawURL, resp.Status)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > maxBytes {
+		return nil, errors.New("download exceeds size limit")
+	}
+	return b, nil
+}
+
+func verifyReleaseChecksum(filename string, archive []byte, checksumFile string) error {
+	var expected string
+	for _, line := range strings.Split(checksumFile, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.TrimPrefix(fields[1], "*") == filename {
+			expected = strings.ToLower(fields[0])
+			break
+		}
+	}
+	if len(expected) != sha256.Size*2 {
+		return errors.New("release checksum is missing")
+	}
+	if _, err := hex.DecodeString(expected); err != nil {
+		return errors.New("release checksum is invalid")
+	}
+	actual := sha256.Sum256(archive)
+	if hex.EncodeToString(actual[:]) != expected {
+		return errors.New("release checksum mismatch")
+	}
+	return nil
 }
 
 func copyStaticFile(srcPath, bin string) string {

@@ -11,3 +11,5 @@ dist/
 build/
 release/
 workspace/
+conf/credential.key
+conf/server.key

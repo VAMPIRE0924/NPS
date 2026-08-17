@@ -171,9 +171,9 @@ re:
 
 	c.Close()
 	if cnf.CommonConfig.Client.WebUserName == "" || cnf.CommonConfig.Client.WebPassword == "" {
-		logs.Notice("web access login username:user password:%s", vkey)
+		logs.Notice("web access enabled for the client VerifyKey account")
 	} else {
-		logs.Notice("web access login username:%s password:%s", cnf.CommonConfig.Client.WebUserName, cnf.CommonConfig.Client.WebPassword)
+		logs.Notice("web access enabled for username:%s", cnf.CommonConfig.Client.WebUserName)
 	}
 	NewRPClient(cnf.CommonConfig.Server, vkey, cnf.CommonConfig.Tp, cnf.CommonConfig.ProxyUrl, cnf, cnf.CommonConfig.DisconnectTime).Start()
 	CloseLocalServer()
@@ -241,7 +241,7 @@ func NewConn(tp string, vkey string, server string, connType string, proxyUrl st
 	if s, err := c.ReadFlag(); err != nil {
 		return nil, err
 	} else if s == common.VERIFY_EER {
-		return nil, errors.New(fmt.Sprintf("Validation key %s incorrect", vkey))
+		return nil, errors.New("validation key incorrect")
 	}
 	if _, err := c.Write([]byte(connType)); err != nil {
 		return nil, err
@@ -251,7 +251,7 @@ func NewConn(tp string, vkey string, server string, connType string, proxyUrl st
 	return c, nil
 }
 
-//http proxy connection
+// http proxy connection
 func NewHttpProxyConn(url *url.URL, remoteAddr string) (net.Conn, error) {
 	req, err := http.NewRequest("CONNECT", "http://"+remoteAddr, nil)
 	if err != nil {
@@ -278,7 +278,7 @@ func NewHttpProxyConn(url *url.URL, remoteAddr string) (net.Conn, error) {
 	return proxyConn, nil
 }
 
-//get a basic auth string
+// get a basic auth string
 func basicAuth(username, password string) string {
 	auth := username + ":" + password
 	return base64.StdEncoding.EncodeToString([]byte(auth))

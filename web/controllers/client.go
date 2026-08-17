@@ -24,12 +24,9 @@ func (s *ClientController) List() {
 	}
 	s.requirePost()
 	start, length := s.GetAjaxParams()
-	clientIdSession := s.GetSession("clientId")
-	var clientId int
-	if clientIdSession == nil {
-		clientId = 0
-	} else {
-		clientId = clientIdSession.(int)
+	clientId := 0
+	if sessionClientID, ok := s.currentClientID(); ok {
+		clientId = sessionClientID
 	}
 	list, cnt := server.GetClientList(start, length, s.getEscapeString("search"), s.getEscapeString("sort"), s.getEscapeString("order"), clientId)
 	cmd := make(map[string]interface{})
@@ -54,7 +51,7 @@ func (s *ClientController) Add() {
 		Remark:    s.getEscapeString("remark"),
 		Cnf: &file.Config{
 			U:        s.getEscapeString("u"),
-			P:        s.getEscapeString("p"),
+			P:        s.GetString("p"),
 			Compress: common.GetBoolByStr(s.getEscapeString("compress")),
 			Crypt:    s.GetBoolNoErr("crypt"),
 		},
@@ -62,7 +59,7 @@ func (s *ClientController) Add() {
 		RateLimit:       s.GetIntNoErr("rate_limit"),
 		MaxConn:         s.GetIntNoErr("max_conn"),
 		WebUserName:     s.getEscapeString("web_username"),
-		WebPassword:     s.getEscapeString("web_password"),
+		WebPassword:     s.GetString("web_password"),
 		MaxTunnelNum:    s.GetIntNoErr("max_tunnel"),
 		Flow: &file.Flow{
 			ExportFlow: 0,
@@ -165,15 +162,17 @@ func (s *ClientController) Edit() {
 		c.Cnf = new(file.Config)
 	}
 	c.Cnf.U = s.getEscapeString("u")
-	c.Cnf.P = s.getEscapeString("p")
+	c.Cnf.P = s.GetString("p")
 	c.Cnf.Compress = common.GetBoolByStr(s.getEscapeString("compress"))
 	c.Cnf.Crypt = s.GetBoolNoErr("crypt")
 	b, err := beego.AppConfig.Bool("allow_user_change_username")
 	if s.isAdminRequest() || (err == nil && b) {
 		c.WebUserName = s.getEscapeString("web_username")
 	}
-	c.WebPassword = s.getEscapeString("web_password")
-	c.ConfigConnAllow = s.GetBoolNoErr("config_conn_allow")
+	c.WebPassword = s.GetString("web_password")
+	if s.isAdminRequest() {
+		c.ConfigConnAllow = s.GetBoolNoErr("config_conn_allow")
+	}
 	if c.Rate != nil {
 		c.Rate.Stop()
 	}

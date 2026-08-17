@@ -3,6 +3,7 @@ package file
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/astaxie/beego/logs"
 	"os"
 	"path/filepath"
@@ -14,11 +15,16 @@ import (
 )
 
 func NewJsonDb(runPath string) *JsonDb {
+	credentials, err := newCredentialStore(runPath)
+	if err != nil {
+		panic(err)
+	}
 	return &JsonDb{
 		RunPath:        runPath,
 		TaskFilePath:   filepath.Join(runPath, "conf", "tasks.json"),
 		HostFilePath:   filepath.Join(runPath, "conf", "hosts.json"),
 		ClientFilePath: filepath.Join(runPath, "conf", "clients.json"),
+		credentials:    credentials,
 	}
 }
 
@@ -32,6 +38,7 @@ type JsonDb struct {
 	TaskFilePath   string //task file path
 	HostFilePath   string //host file path
 	ClientFilePath string //client file path
+	credentials    *credentialStore
 }
 
 func TaskKey(mode string, id int) string {
@@ -50,7 +57,12 @@ func (s *JsonDb) LoadTaskFromJsonFile() {
 	loadSyncMapFromFile(s.TaskFilePath, func(v string) {
 		var err error
 		post := new(Tunnel)
-		if json.Unmarshal([]byte(v), &post) != nil {
+		decoded, migrated, decodeErr := s.credentials.decryptJSON([]byte(v))
+		if decodeErr != nil {
+			panic(fmt.Errorf("decrypt %s: %w", s.TaskFilePath, decodeErr))
+		}
+		changed = changed || migrated
+		if json.Unmarshal(decoded, &post) != nil {
 			return
 		}
 		if post.Client == nil {
@@ -82,22 +94,37 @@ func (s *JsonDb) LoadTaskFromJsonFile() {
 }
 
 func (s *JsonDb) LoadClientFromJsonFile() {
+	changed := false
 	loadSyncMapFromFile(s.ClientFilePath, func(v string) {
 		post := new(Client)
-		if json.Unmarshal([]byte(v), &post) != nil {
+		decoded, migrated, err := s.credentials.decryptJSON([]byte(v))
+		if err != nil {
+			panic(fmt.Errorf("decrypt %s: %w", s.ClientFilePath, err))
+		}
+		changed = changed || migrated
+		if json.Unmarshal(decoded, &post) != nil {
 			return
 		}
 		ensureClientRuntime(post, true)
 		post.NowConn = 0
 		s.Clients.Store(post.Id, post)
 	})
+	if changed {
+		s.StoreClientsToJsonFile()
+	}
 }
 
 func (s *JsonDb) LoadHostFromJsonFile() {
+	changed := false
 	loadSyncMapFromFile(s.HostFilePath, func(v string) {
 		var err error
 		post := new(Host)
-		if json.Unmarshal([]byte(v), &post) != nil {
+		decoded, migrated, decodeErr := s.credentials.decryptJSON([]byte(v))
+		if decodeErr != nil {
+			panic(fmt.Errorf("decrypt %s: %w", s.HostFilePath, decodeErr))
+		}
+		changed = changed || migrated
+		if json.Unmarshal(decoded, &post) != nil {
 			return
 		}
 		if post.Client == nil {
@@ -109,6 +136,9 @@ func (s *JsonDb) LoadHostFromJsonFile() {
 		ensureHostRuntime(post)
 		s.Hosts.Store(post.Id, post)
 	})
+	if changed {
+		s.StoreHostToJsonFile()
+	}
 }
 
 func (s *JsonDb) GetClient(id int) (c *Client, err error) {
@@ -124,7 +154,7 @@ var hostLock sync.Mutex
 
 func (s *JsonDb) StoreHostToJsonFile() {
 	hostLock.Lock()
-	storeSyncMapToFile(&s.Hosts, s.HostFilePath)
+	storeSyncMapToFile(&s.Hosts, s.HostFilePath, s.credentials)
 	hostLock.Unlock()
 }
 
@@ -132,7 +162,7 @@ var taskLock sync.Mutex
 
 func (s *JsonDb) StoreTasksToJsonFile() {
 	taskLock.Lock()
-	storeSyncMapToFile(&s.Tasks, s.TaskFilePath)
+	storeSyncMapToFile(&s.Tasks, s.TaskFilePath, s.credentials)
 	taskLock.Unlock()
 }
 
@@ -140,7 +170,7 @@ var clientLock sync.Mutex
 
 func (s *JsonDb) StoreClientsToJsonFile() {
 	clientLock.Lock()
-	storeSyncMapToFile(&s.Clients, s.ClientFilePath)
+	storeSyncMapToFile(&s.Clients, s.ClientFilePath, s.credentials)
 	clientLock.Unlock()
 }
 
@@ -203,7 +233,7 @@ func loadSyncMapFromFile(filePath string, f func(value string)) {
 	}
 }
 
-func storeSyncMapToFile(m *sync.Map, filePath string) {
+func storeSyncMapToFile(m *sync.Map, filePath string, credentials *credentialStore) {
 	tmpPath := filePath + ".tmp"
 	file, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	// first create a temporary file to store
@@ -237,6 +267,10 @@ func storeSyncMapToFile(m *sync.Map, filePath string) {
 		}
 		if err != nil {
 			return true
+		}
+		b, err = credentials.encryptJSON(b)
+		if err != nil {
+			panic(err)
 		}
 		_, err = file.Write(b)
 		if err != nil {

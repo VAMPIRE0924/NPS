@@ -73,7 +73,10 @@
 
 <script>
     function escapeHtml(value) {
-        return $('<div>').text(value == null ? '' : value).html()
+        if (typeof window.npsEscapeHtml === 'function') {
+            return window.npsEscapeHtml(value)
+        }
+        return $('<div>').text(value == null ? '' : String(value)).html()
     }
 
     function verifyKeyMaskHtml(value) {
@@ -196,13 +199,13 @@
                 + '<b langtag="word-flowlimit"></b>: ' + row.Flow.FlowLimit + 'm&emsp;'
                 + '<b langtag="word-ratelimit"></b>: ' + row.RateLimit + 'kb/s&emsp;'
                 + '<b langtag="word-maxtunnels"></b>: ' + row.MaxTunnelNum + '&emsp;<br/><br/>'
-                + '<b langtag="word-webusername"></b>: ' + row.WebUserName + '&emsp;'
-                + '<b langtag="word-webpassword"></b>: ' + row.WebPassword + '&emsp;'
-                + '<b langtag="word-basicusername"></b>: ' + clientBasicValue(row, 'U') + '&emsp;'
-                + '<b langtag="word-basicpassword"></b>: ' + clientBasicValue(row, 'P') + '&emsp;<br/><br/>'
-                + '<b langtag="word-crypt"></b>: <span langtag="word-' + clientBasicValue(row, 'Crypt') + '"></span>&emsp;'
-                + '<b langtag="word-compress"></b>: <span langtag="word-' + clientBasicValue(row, 'Compress') + '"></span>&emsp;'
-                + '<b langtag="word-connectbyconfig"></b>: <span langtag="word-' + row.ConfigConnAllow + '"></span>&emsp;<br/><br/>'
+                + '<b langtag="word-webusername"></b>: ' + escapeHtml(row.WebUserName) + '&emsp;'
+                + '<b langtag="word-webpassword"></b>: ' + escapeHtml(row.WebPassword) + '&emsp;'
+                + '<b langtag="word-basicusername"></b>: ' + escapeHtml(clientBasicValue(row, 'U')) + '&emsp;'
+                + '<b langtag="word-basicpassword"></b>: ' + escapeHtml(clientBasicValue(row, 'P')) + '&emsp;<br/><br/>'
+                + '<b langtag="word-crypt"></b>: <span langtag="word-' + escapeHtml(clientBasicValue(row, 'Crypt')) + '"></span>&emsp;'
+                + '<b langtag="word-compress"></b>: <span langtag="word-' + escapeHtml(clientBasicValue(row, 'Compress')) + '"></span>&emsp;'
+                + '<b langtag="word-connectbyconfig"></b>: <span langtag="word-' + escapeHtml(row.ConfigConnAllow) + '"></span>&emsp;<br/><br/>'
                 + '<b langtag="word-commandclient"></b>: ' + clientCommandHtml(row)
         },
         //表格的列
@@ -224,13 +227,15 @@
                 field: 'Remark',//域值
                 title: '<span langtag="word-remark"></span>',//标题
                 halign: 'center',
-                visible: true//false表示不显示
+                visible: true,//false表示不显示
+                formatter: function (value) { return escapeHtml(value) }
             },
             {
                 field: 'Version',//域值
                 title: '<span langtag="word-version"></span>',//标题
                 halign: 'center',
-                visible: true//false表示不显示
+                visible: true,//false表示不显示
+                formatter: function (value) { return escapeHtml(value) }
             },
             {
                 field: 'VerifyKey',//域值
@@ -249,7 +254,8 @@
                 field: 'Addr',//域值
                 title: '<span langtag="word-address"></span>',//标题
                 halign: 'center',
-                visible: true//false表示不显示
+                visible: true,//false表示不显示
+                formatter: function (value) { return escapeHtml(value) }
             },
             {
                 field: 'InletFlow',//域值
@@ -331,7 +337,7 @@
                     btn_group += '); return false;" class="btn btn-outline btn-info"><i class="fa fa-key"></i></a>'
                     {{end}}
 
-                    btn_group += '<a href="{{.web_base_url}}/client/edit?id=' + row.Id
+                    btn_group += '<a href="{{.web_base_url}}/client/edit?id=' + Number(row.Id)
                     btn_group += '" class="btn btn-outline btn-success"><i class="fa fa-edit"></i></a></div>'
                     return btn_group
                 }
@@ -343,9 +349,9 @@
                 halign: 'center',
                 visible: true,//false表示不显示
                 formatter: function (value, row, index) {
-                    return '<div class="btn-group"><a href="{{.web_base_url}}/index/all?client_id=' + row.Id
+                    return '<div class="btn-group"><a href="{{.web_base_url}}/index/all?client_id=' + Number(row.Id)
                         + '" class="btn btn-outline btn-primary" langtag="word-tunnel"></a>'
-                        + '<a href="{{.web_base_url}}/index/hostlist?client_id=' + row.Id
+                        + '<a href="{{.web_base_url}}/index/hostlist?client_id=' + Number(row.Id)
                         + '" class="btn btn-outline btn-success" langtag="word-host"></a></div>'
                 }
             }

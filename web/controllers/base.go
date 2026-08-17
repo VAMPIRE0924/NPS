@@ -39,10 +39,21 @@ func (s *BaseController) Prepare() {
 			s.rejectUnauthorized("API authentication required")
 		}
 		s.Redirect(beego.AppConfig.String("web_base_url")+"/login/index", 302)
+		s.StopRun()
 	}
-	if !s.apiAuthenticated && s.GetSession("isAdmin") != nil && !s.GetSession("isAdmin").(bool) {
-		s.Ctx.Input.SetData("client_id", s.GetSession("clientId").(int))
-		s.Ctx.Input.SetParam("client_id", strconv.Itoa(s.GetSession("clientId").(int)))
+	if s.apiAuthenticated {
+		s.Data["isAdmin"] = true
+	} else if isAdmin, ok := s.GetSession("isAdmin").(bool); !ok {
+		s.DestroySession()
+		s.rejectUnauthorized("invalid session role")
+	} else if !isAdmin {
+		clientID, ok := s.GetSession("clientId").(int)
+		if !ok || clientID <= 0 {
+			s.DestroySession()
+			s.rejectUnauthorized("invalid client session")
+		}
+		s.Ctx.Input.SetData("client_id", clientID)
+		s.Ctx.Input.SetParam("client_id", strconv.Itoa(clientID))
 		s.Data["isAdmin"] = false
 		s.Data["username"] = s.GetSession("username")
 		s.CheckUserAuth()
@@ -79,6 +90,67 @@ func (s *BaseController) isAdminRequest() bool {
 	}
 	isAdmin, _ := s.GetSession("isAdmin").(bool)
 	return isAdmin
+}
+
+func (s *BaseController) currentClientID() (int, bool) {
+	if s.isAdminRequest() {
+		return 0, false
+	}
+	id, ok := s.GetSession("clientId").(int)
+	return id, ok && id > 0
+}
+
+func (s *BaseController) effectiveClientID(requested int) int {
+	if !s.isAdminRequest() {
+		id, ok := s.currentClientID()
+		if !ok {
+			return 0
+		}
+		return selectEffectiveClientID(false, id, requested)
+	}
+	return selectEffectiveClientID(true, 0, requested)
+}
+
+func selectEffectiveClientID(admin bool, sessionClientID, requested int) int {
+	if !admin {
+		return sessionClientID
+	}
+	return requested
+}
+
+func clientMayMutateTask(action, mode string) bool {
+	mode = file.CanonicalTaskMode(mode)
+	switch action {
+	case "add", "edit", "del":
+		return mode == "secret" || mode == "p2p"
+	case "start", "stop":
+		return mode == "secret" || mode == "p2p" || mode == file.TaskModeSocks
+	default:
+		return true
+	}
+}
+
+func clientMayMutateTaskRequest(action, currentMode, requestedMode string) bool {
+	if !clientMayMutateTask(action, currentMode) {
+		return false
+	}
+	if action == "edit" && requestedMode != "" {
+		return clientMayMutateTask(action, requestedMode)
+	}
+	return true
+}
+
+func (s *BaseController) rejectForbidden() {
+	// Writing only Output.Status during Prepare leaves forbidden GET requests
+	// with an empty HTTP 200 response because no later renderer commits the
+	// stored status. Commit the status before serializing the same Ajax-shaped
+	// error used by POST requests so browsers and API clients both receive an
+	// unambiguous denial.
+	s.Ctx.Output.Header("Content-Type", "application/json; charset=utf-8")
+	s.Ctx.ResponseWriter.WriteHeader(http.StatusForbidden)
+	s.Data["json"] = ajax("permission denied", 0)
+	s.ServeJSON()
+	s.StopRun()
 }
 
 func (s *BaseController) requirePost() {
@@ -136,6 +208,22 @@ func authorizationTaskMode(actionName, requestedMode string) string {
 		return file.TaskModeSocks
 	}
 	return requestedMode
+}
+
+func authorizationModeForRequest(actionName, requestedMode, oldMode string) string {
+	if actionName == "edit" && oldMode != "" {
+		return file.CanonicalTaskMode(oldMode)
+	}
+	return authorizationTaskMode(actionName, requestedMode)
+}
+
+func isHostAuthorizationAction(actionName string) bool {
+	switch actionName {
+	case "hostlist", "gethost", "addhost", "edithost", "delhost":
+		return true
+	default:
+		return false
+	}
 }
 
 // 去掉没有err返回值的int
@@ -211,37 +299,49 @@ func (s *BaseController) SetType(name string) {
 }
 
 func (s *BaseController) CheckUserAuth() {
+	clientID, ok := s.currentClientID()
+	if !ok {
+		s.rejectForbidden()
+	}
 	if s.controllerName == "client" {
-		if s.actionName == "add" {
-			s.StopRun()
-			return
+		switch s.actionName {
+		case "add", "basic", "changestatus", "del":
+			s.rejectForbidden()
 		}
 		if id := s.GetIntNoErr("id"); id != 0 {
-			if id != s.GetSession("clientId").(int) {
-				s.StopRun()
-				return
+			if id != clientID {
+				s.rejectForbidden()
 			}
 		}
 	}
 	if s.controllerName == "index" {
+		requestedMode := s.getTaskMode()
+		mode := authorizationModeForRequest(s.actionName, requestedMode, s.getEscapeString("old_type"))
+		if s.Ctx.Request.Method == http.MethodPost {
+			switch s.actionName {
+			case "add", "edit", "del", "start", "stop":
+				if !clientMayMutateTaskRequest(s.actionName, mode, requestedMode) {
+					s.rejectForbidden()
+				}
+			}
+		}
 		if id := s.GetIntNoErr("id"); id != 0 {
 			belong := false
-			if strings.Contains(s.actionName, "h") {
+			if isHostAuthorizationAction(s.actionName) {
 				if v, ok := file.GetDb().JsonDb.Hosts.Load(id); ok {
-					if v.(*file.Host).Client.Id == s.GetSession("clientId").(int) {
+					if v.(*file.Host).Client.Id == clientID {
 						belong = true
 					}
 				}
 			} else {
-				mode := authorizationTaskMode(s.actionName, s.getTaskMode())
 				if v, err := file.GetDb().ResolveTask(mode, id); err == nil {
-					if v.Client.Id == s.GetSession("clientId").(int) {
+					if v.Client.Id == clientID {
 						belong = true
 					}
 				}
 			}
 			if !belong {
-				s.StopRun()
+				s.rejectForbidden()
 			}
 		}
 	}

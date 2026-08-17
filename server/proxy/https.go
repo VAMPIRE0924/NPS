@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"ehang.io/nps/lib/cache"
 	"ehang.io/nps/lib/common"
@@ -32,7 +33,7 @@ func NewHttpsServer(l net.Listener, bridge NetBridge, useCache bool, cacheLen in
 	return https
 }
 
-//start https server
+// start https server
 func (https *HttpsServer) Start() error {
 	if b, err := beego.AppConfig.Bool("https_just_proxy"); err == nil && b {
 		conn.Accept(https.listener, func(c net.Conn) {
@@ -48,7 +49,13 @@ func (https *HttpsServer) Start() error {
 			https.httpsListenerMap.Store("default", l)
 		}
 		conn.Accept(https.listener, func(c net.Conn) {
+			_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 			serverName, rb := GetServerNameFromClientHello(c)
+			_ = c.SetReadDeadline(time.Time{})
+			if rb == nil {
+				_ = c.Close()
+				return
+			}
 			//if the clientHello does not contains sni ,use the default ssl certificate
 			if serverName == "" {
 				serverName = "default"
@@ -99,9 +106,15 @@ func (https *HttpsServer) NewHttps(l net.Listener, certFile string, keyFile stri
 	}()
 }
 
-//handle the https which is just proxy to other client
+// handle the https which is just proxy to other client
 func (https *HttpsServer) handleHttps(c net.Conn) {
+	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 	hostName, rb := GetServerNameFromClientHello(c)
+	_ = c.SetReadDeadline(time.Time{})
+	if rb == nil {
+		_ = c.Close()
+		return
+	}
 	var targetAddr string
 	r := buildHttpsRequest(hostName)
 	var host *file.Host

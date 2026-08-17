@@ -1,8 +1,8 @@
 # NPS Server
 
 NPS server image maintained at `vampirerune/nps`. It keeps existing NPC binaries and configuration
-compatible while adding independent tunnel ID pools, managed SOCKS5 tunnels, and hardened Web/API
-authentication.
+compatible while adding independent tunnel ID pools, managed SOCKS5 tunnels, tenant-isolated Web
+sessions, encrypted credential storage, and hardened API authentication.
 
 ## Image tags
 
@@ -28,7 +28,11 @@ chmod 600 ./conf/nps.conf
 ```
 
 Keep `public_vkey` and `auth_key` empty unless those features are required. Never publish real keys,
-passwords, certificates, or persisted JSON data.
+passwords, certificates, persisted JSON data, or `credential.key`.
+
+The first successful start creates `conf/credential.key` and rewrites credential fields in
+`nps.conf`, `clients.json`, `tasks.json`, and `hosts.json` as `npsenc:v1:` ciphertext. The files stay
+encrypted after NPS stops; Web, API, and NPC behavior still use the in-memory plaintext values.
 
 ## Docker Compose (Linux host network)
 
@@ -72,7 +76,14 @@ Add both TCP and UDP mappings for every port-forward rule when bridge networking
 
 ## Upgrade
 
-Back up `conf/`, then pull and recreate the container:
+Back up the complete `conf/` directory, then pull and recreate the container:
+
+```bash
+tar -czf nps-conf-before-upgrade.tar.gz conf
+```
+
+Do not omit `credential.key`: encrypted configuration cannot be restored with a different key.
+Then upgrade:
 
 ```bash
 docker compose pull
@@ -81,10 +92,13 @@ docker compose up -d
 
 For reproducible production deployment, pin a numbered version instead of `main`. NPS and its
 matching `/nps/web` assets are shipped together in the image. Existing NPC installations do not need
-to be replaced.
+to be replaced. Rolling back to a build that predates encrypted credential storage also requires the
+complete pre-upgrade `conf/` backup.
 
 ## Links
 
 - Source and documentation: https://github.com/VAMPIRE0924/NPS
 - Releases and checksums: https://github.com/VAMPIRE0924/NPS/releases
 - API authentication: https://github.com/VAMPIRE0924/NPS/blob/main/API.md
+- Upgrade and rollback: https://github.com/VAMPIRE0924/NPS/blob/main/UPGRADING.md
+- Changes: https://github.com/VAMPIRE0924/NPS/blob/main/CHANGELOG.md

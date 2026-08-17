@@ -18,7 +18,7 @@
                 <div class="content">
                     <div class="table-responsive">
                         <div id="toolbar">
-                            {{if ne .type "socks5"}}
+                            {{if and (ne .type "socks5") (or .isAdmin (eq .type "secret") (eq .type "p2p"))}}
                                 <a href="{{.web_base_url}}/index/add?type={{.type}}&client_id={{.client_id}}" class="btn btn-primary dim">
                                 <i class="fa fa-fw fa-lg fa-plus"></i> <span langtag="word-add"></span></a>
                             {{end}}
@@ -36,9 +36,17 @@
 </div>
 
 <script>
+    function escapeHtml(value) {
+        if (typeof window.npsEscapeHtml === 'function') {
+            return window.npsEscapeHtml(value)
+        }
+        return $('<div>').text(value == null ? '' : String(value)).html()
+    }
     name = '{{.name}}:'.replace(/\s*/g,"")
     $('#langtag').attr('langtag','page-list' + name.replace(/:.*/,"")).next().text(name.split(":")[1])
     var isSocks5List = {{if eq .type "socks5"}}true{{else}}false{{end}};
+    var canControlTask = {{if or .isAdmin (eq .type "secret") (eq .type "p2p") (eq .type "socks5")}}true{{else}}false{{end}};
+    var canModifyTask = {{if or .isAdmin (eq .type "secret") (eq .type "p2p")}}true{{else}}false{{end}};
     var socksRateRefreshMs = 5000;
     var socksRateCache = {};
 
@@ -121,21 +129,21 @@
                     + '<b langtag="word-inletflow"></b>: ' + changeunit(row.Flow.InletFlow) + '&emsp;'
                     + '<b langtag="word-crypt"></b>: ' + row.Client.Cnf.Crypt + '&emsp;'
                     + '<b langtag="word-compress"></b>: ' + row.Client.Cnf.Compress + '&emsp;'
-                    + '<b langtag="word-basicusername"></b>: ' + row.Client.Cnf.U + '&emsp;'
-                    + '<b langtag="word-basicpassword"></b>: ' + row.Client.Cnf.P + '&emsp;'
+                    + '<b langtag="word-basicusername"></b>: ' + escapeHtml(row.Client.Cnf.U) + '&emsp;'
+                    + '<b langtag="word-basicpassword"></b>: ' + escapeHtml(row.Client.Cnf.P) + '&emsp;'
             if (row.Mode == "p2p") {
                 return tmp + "<br/><br>"
-                        + '<b langtag="word-commandaccessp2p"></b>: ' + "<code>./npc{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
-                        + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -target=" + row.Target.TargetStr + "</code>" + "<br/><br>"
-                        + '<b langtag="word-commandaccessp2ps"></b>: ' + "<code>./npc{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
-                        + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=p2ps" + "</code>" + "<br/><br>"
-                        + '<b langtag="word-commandaccessp2pt"></b>: ' + "<code>./npc{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
-                        + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=p2pt" + "</code>"
+                        + '<b langtag="word-commandaccessp2p"></b>: <code>' + escapeHtml("./npc{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey
+                        + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -target=" + row.Target.TargetStr) + "</code><br/><br>"
+                        + '<b langtag="word-commandaccessp2ps"></b>: <code>' + escapeHtml("./npc{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey
+                        + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=p2ps") + "</code><br/><br>"
+                        + '<b langtag="word-commandaccessp2pt"></b>: <code>' + escapeHtml("./npc{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey
+                        + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=p2pt") + "</code>"
 
             }
             if (row.Mode == "secret") {
-                return tmp + "<br/><br>" + '<b langtag="word-commandaccess"></b>: ' + "<code>./npc{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey 
-                        + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=secret" + "</code>"
+                return tmp + "<br/><br>" + '<b langtag="word-commandaccess"></b>: <code>' + escapeHtml("./npc{{.win}} -server={{.ip}}:{{.p}} -vkey=" + row.Client.VerifyKey
+                        + " -type=" +{{.bridgeType}} +" -password=" + row.Password + " -local_type=secret") + "</code>"
             }
             return tmp
         },
@@ -160,7 +168,8 @@
                 field: 'Remark',//域值
                 title: '<span langtag="word-remark"></span>',//标题
                 halign: 'center',
-                visible: true//false表示不显示
+                visible: true,//false表示不显示
+                formatter: function (value) { return escapeHtml(value) }
             },
             {
                 field: 'Mode',//域值
@@ -186,7 +195,7 @@
                     if (row.Mode == "socks5") {
                         return formatRate(row.InletRate)
                     }
-                    return row.Target.TargetStr
+                    return escapeHtml(row.Target.TargetStr)
                 }
             },
             {
@@ -198,7 +207,7 @@
                     if (row.Mode == "socks5") {
                         return formatRate(row.ExportRate)
                     }
-                    return value
+                    return escapeHtml(value)
                 }
             },
             {
@@ -250,27 +259,39 @@
                 halign: 'center',
                 visible: true,//false表示不显示
                 formatter: function (value, row, index) {
-                    var payload = "{'id':" + row.Id + ",'type':'" + row.Mode + "'}"
+                    var taskId = Number(row.Id)
+                    var taskMode = escapeHtml(String(row.Mode))
                     var btn_group = '<div class="btn-group">'
-                    if (row.Status) {
-                        btn_group += "<a onclick=\"submitform('stop', '{{.web_base_url}}/index/stop', " + payload
-                        btn_group += ')" class="btn btn-outline btn-warning"><i class="fa fa-pause"></i></a>'
-                    } else {
-                        btn_group += "<a onclick=\"submitform('start', '{{.web_base_url}}/index/start', " + payload
-                        btn_group += ')" class="btn btn-outline btn-primary"><i class="fa fa-play"></i></a>'
-                    }
-                    if (row.Mode == "socks5") {
+                    if (!canControlTask) {
                         return btn_group + '</div>'
                     }
-                    btn_group += "<a onclick=\"submitform('delete', '{{.web_base_url}}/index/del', " + payload
-                    btn_group += ')" class="btn btn-outline btn-danger"><i class="fa fa-trash"></i></a>'
-                    btn_group += '<a  href="{{.web_base_url}}/index/edit?id=' + row.Id + '&type=' + row.Mode
+                    if (row.Status) {
+                        btn_group += '<button type="button" data-task-action="stop" data-task-id="' + taskId
+                        btn_group += '" data-task-type="' + taskMode + '" class="task-action btn btn-outline btn-warning"><i class="fa fa-pause"></i></button>'
+                    } else {
+                        btn_group += '<button type="button" data-task-action="start" data-task-id="' + taskId
+                        btn_group += '" data-task-type="' + taskMode + '" class="task-action btn btn-outline btn-primary"><i class="fa fa-play"></i></button>'
+                    }
+                    if (row.Mode == "socks5" || !canModifyTask) {
+                        return btn_group + '</div>'
+                    }
+                    btn_group += '<button type="button" data-task-action="del" data-task-id="' + taskId
+                    btn_group += '" data-task-type="' + taskMode + '" class="task-action btn btn-outline btn-danger"><i class="fa fa-trash"></i></button>'
+                    btn_group += '<a href="{{.web_base_url}}/index/edit?id=' + taskId + '&type=' + encodeURIComponent(String(row.Mode))
                     btn_group += '" class="btn btn-outline btn-success"><i class="fa fa-edit"></i></a></div>'
                     return btn_group
                 }
             }
         ]
     });
+    $('#table').on('click', '.task-action', function () {
+        var action = String($(this).attr('data-task-action'))
+        var operation = action == 'del' ? 'delete' : action
+        submitform(operation, '{{.web_base_url}}/index/' + action, {
+            id: Number($(this).attr('data-task-id')),
+            type: String($(this).attr('data-task-type'))
+        })
+    })
     if (isSocks5List) {
         setInterval(function () {
             $('#table').bootstrapTable('refresh', {silent: true})
