@@ -141,12 +141,16 @@ func clientMayMutateTaskRequest(action, currentMode, requestedMode string) bool 
 }
 
 func (s *BaseController) rejectForbidden() {
-	s.Ctx.Output.SetStatus(http.StatusForbidden)
-	if s.Ctx.Request.Method == http.MethodGet {
-		s.error()
-		s.StopRun()
-	}
-	s.AjaxErr("permission denied")
+	// Writing only Output.Status during Prepare leaves forbidden GET requests
+	// with an empty HTTP 200 response because no later renderer commits the
+	// stored status. Commit the status before serializing the same Ajax-shaped
+	// error used by POST requests so browsers and API clients both receive an
+	// unambiguous denial.
+	s.Ctx.Output.Header("Content-Type", "application/json; charset=utf-8")
+	s.Ctx.ResponseWriter.WriteHeader(http.StatusForbidden)
+	s.Data["json"] = ajax("permission denied", 0)
+	s.ServeJSON()
+	s.StopRun()
 }
 
 func (s *BaseController) requirePost() {

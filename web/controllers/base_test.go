@@ -1,9 +1,12 @@
 package controllers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	beecontext "github.com/astaxie/beego/context"
 )
 
 func TestUnauthenticatedProtectedPostRequiresAPIAuth(t *testing.T) {
@@ -45,5 +48,35 @@ func TestClientMutationModesDoNotAllocateDedicatedNPSPorts(t *testing.T) {
 	}
 	if !clientMayMutateTaskRequest("edit", "secret", "p2p") {
 		t.Fatal("client should retain edits between permitted shared modes")
+	}
+}
+
+func TestRejectForbiddenCommitsHTTPStatusAndJSONBody(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx := beecontext.NewContext()
+	ctx.Reset(recorder, httptest.NewRequest(http.MethodGet, "/client/edit?id=1", nil))
+	controller := new(BaseController)
+	controller.Init(ctx, "BaseController", "Test", controller)
+
+	var recovered interface{}
+	func() {
+		defer func() { recovered = recover() }()
+		controller.rejectForbidden()
+	}()
+	if recovered == nil {
+		t.Fatal("rejectForbidden must stop controller execution")
+	}
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("forbidden response status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
+		t.Fatalf("forbidden response Content-Type = %q", got)
+	}
+	var response map[string]interface{}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("forbidden response is not JSON: %v", err)
+	}
+	if response["status"] != float64(0) || response["msg"] != "permission denied" {
+		t.Fatalf("unexpected forbidden response: %#v", response)
 	}
 }
