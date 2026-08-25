@@ -21,8 +21,8 @@
 - 移除每 Client Web 用户名/密码的新增、编辑、列表、注册和登录路径；客户端 Web
   只使用固定用户名 `user` + Client VerifyKey。历史字段在加载时清理。
 - VerifyKey 新增/编辑不再被 HTML 转义，避免服务端身份与 NPC 实际密钥不一致。
-- 拒绝编辑为空或重复 VerifyKey；历史空 VerifyKey 在加载时自动轮换为新的 16 位密码学
-  随机密钥，并以 AES-256-GCM 密文回写。
+- 编辑时留空会重新生成 VerifyKey，非空重复值会被拒绝；历史空 VerifyKey 在加载时自动轮换为
+  新的 16 位密码学随机密钥，并以 AES-256-GCM 密文回写。
 
 ### 验证
 

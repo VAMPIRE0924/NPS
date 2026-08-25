@@ -464,13 +464,21 @@ func (s *DbUtils) UpdateClient(t *Client) error {
 	if t == nil {
 		return errors.New("client is nil")
 	}
-	if strings.TrimSpace(t.VerifyKey) == "" {
-		return errors.New("Vkey cannot be empty")
-	}
 	s.JsonDb.idLock.Lock()
 	defer s.JsonDb.idLock.Unlock()
-	if !s.VerifyVkey(t.VerifyKey, t.Id) {
-		return errors.New("Vkey duplicate, please reset")
+	t.VerifyKey = strings.TrimSpace(t.VerifyKey)
+	autoVerifyKey := t.VerifyKey == ""
+	for {
+		if t.VerifyKey == "" {
+			t.VerifyKey = crypt.GetRandomString(16)
+		}
+		if s.VerifyVkey(t.VerifyKey, t.Id) {
+			break
+		}
+		if !autoVerifyKey {
+			return errors.New("Vkey duplicate, please reset")
+		}
+		t.VerifyKey = ""
 	}
 	t.WebUserName = ""
 	t.WebPassword = ""

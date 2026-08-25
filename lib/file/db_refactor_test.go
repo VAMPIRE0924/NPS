@@ -181,7 +181,7 @@ func TestNewClientVerifyKeyAuthenticatesImmediatelyAndAfterReload(t *testing.T) 
 	}
 }
 
-func TestEmptyVerifyKeyCannotBeStoredOrAuthenticated(t *testing.T) {
+func TestEmptyVerifyKeyUpdateGeneratesNewAuthenticatedKey(t *testing.T) {
 	db := newTestDb(t)
 	client := newTestClient("client")
 	client.VerifyKey = "original-key"
@@ -189,22 +189,25 @@ func TestEmptyVerifyKeyCannotBeStoredOrAuthenticated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	candidate := &Client{Id: client.Id, VerifyKey: ""}
-	if err := db.UpdateClient(candidate); err == nil {
-		t.Fatal("empty VerifyKey update was accepted")
+	candidate := &Client{Id: client.Id, VerifyKey: "", Status: true}
+	if err := db.UpdateClient(candidate); err != nil {
+		t.Fatal(err)
 	}
 	stored, err := db.GetClient(client.Id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.VerifyKey != "original-key" {
-		t.Fatalf("rejected update changed stored VerifyKey to %q", stored.VerifyKey)
+	if len(stored.VerifyKey) != 16 || stored.VerifyKey == "original-key" {
+		t.Fatalf("empty VerifyKey update did not generate a new key: %q", stored.VerifyKey)
 	}
 	if db.VerifyVkey("", client.Id) {
 		t.Fatal("empty VerifyKey passed uniqueness validation")
 	}
 	if _, err := db.GetIdByVerifyKey(common.Getverifyval(""), "192.0.2.10:1234"); err == nil {
 		t.Fatal("empty VerifyKey authenticated on the NPC wire protocol")
+	}
+	if id, err := db.GetIdByVerifyKey(common.Getverifyval(stored.VerifyKey), "192.0.2.10:1234"); err != nil || id != client.Id {
+		t.Fatalf("generated VerifyKey did not authenticate: id=%d err=%v", id, err)
 	}
 }
 

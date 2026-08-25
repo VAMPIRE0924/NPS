@@ -105,7 +105,7 @@ func TestVerifyKeyInputIsNotHTMLEscaped(t *testing.T) {
 	}
 }
 
-func TestVerifyKeyInputTrimsToEmptyInsteadOfCreatingAWeakIdentity(t *testing.T) {
+func TestVerifyKeyInputTrimsToEmptyForAutomaticRegeneration(t *testing.T) {
 	if got := normalizeVerifyKeyInput("  \t\n"); got != "" {
 		t.Fatalf("whitespace VerifyKey normalized to %q", got)
 	}

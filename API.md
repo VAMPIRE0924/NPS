@@ -165,7 +165,7 @@ portForward  socks5  httpProxy  secret  p2p  file
 
 ```text
 remark
-vkey                 新增时留空由服务端生成；编辑时必须非空且唯一
+vkey                 新增或编辑时留空由服务端生成；填写时必须唯一
 u
 p
 compress             1/0

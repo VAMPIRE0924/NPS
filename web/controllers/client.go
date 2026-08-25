@@ -140,11 +140,7 @@ func (s *ClientController) Edit() {
 	}
 	if s.isAdminRequest() {
 		verifyKey := normalizeVerifyKeyInput(s.GetString("vkey"))
-		if verifyKey == "" {
-			s.AjaxErr("Vkey cannot be empty")
-			return
-		}
-		if !file.GetDb().VerifyVkey(verifyKey, c.Id) {
+		if verifyKey != "" && !file.GetDb().VerifyVkey(verifyKey, c.Id) {
 			s.AjaxErr("Vkey duplicate, please reset")
 			return
 		}
