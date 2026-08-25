@@ -18,7 +18,8 @@
 - 每个可见 Client 自动绑定同 ID 的托管 SOCKS5，默认关闭，连续 30 分钟无流量后自动停止。
 - 管理 API 使用覆盖原始正文的 HMAC-SHA256、30 秒时间窗和 nonce 防重放；旧 MD5 API 已移除。
 - Web 写操作使用 POST 与 CSRF；登录成功轮换 Session ID，Cookie 使用安全属性。
-- 普通客户可以用本 Client 的 VerifyKey 登录 Web，但只能查看自己的对象，不获得管理 API 权限。
+- 普通客户可以用固定用户名 `user` 加本 Client 的 VerifyKey 登录 Web，但只能查看自己的对象，
+  不获得管理 API 权限。
 - `nps.conf` 与持久化 JSON 中的凭据使用 AES-256-GCM 非明文落盘。
 - 现有 Web/API 查询仍读取进程内明文值，不改变 NPC、Web 登录或管理平台调用语义。
 
@@ -89,7 +90,7 @@ bridge 网络必须显式映射 Web、NPC Bridge、HTTP/HTTPS 和每个隧道端
 `npsenc:v1:` 密文：
 
 - `nps.conf`：`web_password`、`auth_key`、`public_vkey`；
-- `clients.json`：VerifyKey、Web 密码、Basic 密码；
+- `clients.json`：VerifyKey、Basic 密码；历史每 Client Web 用户名/密码会被清理；
 - `tasks.json`、`hosts.json`：隧道、Host 和多账号凭据。
 
 密文不会在停止服务后恢复为明文。备份、迁移和恢复必须整体复制同一份 `conf/`；缺少或错配

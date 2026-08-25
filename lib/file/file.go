@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"ehang.io/nps/lib/common"
+	"ehang.io/nps/lib/crypt"
 )
 
 func NewJsonDb(runPath string) *JsonDb {
@@ -109,12 +110,33 @@ func (s *JsonDb) LoadClientFromJsonFile() {
 		if json.Unmarshal(decoded, &post) != nil {
 			return
 		}
+		if strings.TrimSpace(post.VerifyKey) == "" {
+			post.VerifyKey = s.newUniqueVerifyKey()
+			changed = true
+		}
 		ensureClientRuntime(post, true)
 		post.NowConn = 0
 		s.Clients.Store(post.Id, post)
 	})
 	if changed {
 		s.StoreClientsToJsonFile()
+	}
+}
+
+func (s *JsonDb) newUniqueVerifyKey() string {
+	for {
+		candidate := crypt.GetRandomString(16)
+		duplicate := false
+		s.Clients.Range(func(key, value interface{}) bool {
+			if value.(*Client).VerifyKey == candidate {
+				duplicate = true
+				return false
+			}
+			return true
+		})
+		if !duplicate {
+			return candidate
+		}
 	}
 }
 

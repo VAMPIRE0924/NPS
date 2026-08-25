@@ -65,6 +65,8 @@ func TestDisabledOrHiddenClientCannotLogIn(t *testing.T) {
 	for _, client := range []*file.Client{
 		{Status: false, VerifyKey: "key"},
 		{Status: true, NoDisplay: true, VerifyKey: "key"},
+		{Status: true, VerifyKey: ""},
+		{Status: true, VerifyKey: "   "},
 	} {
 		if matchesClientWebLogin(client, "user", "key") {
 			t.Fatal("disabled or hidden Client authenticated")

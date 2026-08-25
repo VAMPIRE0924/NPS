@@ -1,7 +1,11 @@
 # 升级与回滚
 
-本文适用于从 `v2.0.0` 或更早版本升级到下一次 `main` 稳定构建。升级不要求替换 NPC，但会迁移
-NPS 本地凭据的落盘格式。
+本文适用于升级到 `v2.0.2`。从 `v2.0.1` 升级不改变凭据密文格式；从 `v2.0.0` 或更早
+版本升级时，首次启动会迁移 NPS 本地凭据的落盘格式。所有路径都不要求替换 NPC。
+
+`v2.0.2` 会清理已废弃的每 Client Web 用户名/密码字段；客户端 Web 登录统一使用
+`user` + Client VerifyKey。如果历史 Client 的 VerifyKey 为空，启动时会自动生成新密钥，部署后应
+在 Client 列表中核对并更新对应 NPC 配置。
 
 ## 升级前
 
@@ -71,6 +75,7 @@ web/views/
 
 - Web 管理端可以登录，Session 与 CSRF 正常。
 - 现有 Client 重新上线，Client/Host/Tunnel 数量与升级前一致。
+- `ConfigConnAllow=false` 的配置文件 NPC 仍能上线，但其配置不会新增服务端规则。
 - 历史 TCP/UDP、HTTP/HTTPS、SOCKS、P2P 和 file 规则状态正确。
 - 普通客户只能看到自己的对象；管理 API 仍只接受 HMAC 管理员身份。
 - `conf/credential.key` 和持久化文件权限为 `0600`，文件中不再出现已知明文凭据。

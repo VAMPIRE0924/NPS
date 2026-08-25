@@ -18,11 +18,6 @@
 		<zh-CN>NPS - 登录</zh-CN>
 		<en-US>NPS login</en-US>
 	</lang>
-	<lang id="title-register">
-		<zh-CN>NPS - 注册</zh-CN>
-		<en-US>NPS Register</en-US>
-	</lang>
-
 	<lang id="scheme-host">
 		<zh-CN>域名解析</zh-CN>
 		<en-US>Host</en-US>
@@ -387,10 +382,6 @@
 		<zh-CN>带宽限制</zh-CN>
 		<en-US>Rate limit</en-US>
 	</lang>
-	<lang id="word-register">
-		<zh-CN>注册</zh-CN>
-		<en-US>Register</en-US>
-	</lang>
 	<lang id="word-remark">
 		<zh-CN>备注</zh-CN>
 		<en-US>Remark</en-US>
@@ -631,20 +622,12 @@
 		<en-US>Domain name resolution has functions such as custom headers, 404 page configuration, host modification, site protection, URL routing, and pan-resolution.</en-US>
 	</lang>
 	<lang id="info-feature9">
-		<zh-CN>服务端支持多用户和用户注册功能</zh-CN>
-		<en-US>Multi-user and user registration support on server.</en-US>
-	</lang>
-	<lang id="info-noaccount">
-		<zh-CN>还没有有帐号？</zh-CN>
-		<en-US>Do not have an account?</en-US>
+		<zh-CN>服务端支持隔离的客户端 Web 会话和管理员控制面</zh-CN>
+		<en-US>Isolated client Web sessions and an administrator control plane.</en-US>
 	</lang>
 	<lang id="info-onlyproxy">
 		<zh-CN>仅限Socks5、Web、HTTP转发代理</zh-CN>
 		<en-US>Only socks5 , web, HTTP forward proxy</en-US>
-	</lang>
-	<lang id="info-register">
-		<zh-CN>注册到 NPS</zh-CN>
-		<en-US>Register to NPS</en-US>
 	</lang>
 	<lang id="info-suchashost">
 		<zh-CN>例如 a.proxy.com</zh-CN>

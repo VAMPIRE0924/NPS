@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -125,6 +126,39 @@ func TestLegacyPlaintextCredentialsMigrateOnLoad(t *testing.T) {
 	}
 	if bytes.Contains(b, []byte("WebUserName")) || bytes.Contains(b, []byte("WebPassword")) {
 		t.Fatal("obsolete per-client Web credential fields were not removed during migration")
+	}
+}
+
+func TestLegacyEmptyVerifyKeyIsRotatedDuringLoad(t *testing.T) {
+	runPath := t.TempDir()
+	confDir := filepath.Join(runPath, "conf")
+	if err := os.MkdirAll(confDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"Id":1,"VerifyKey":"","Status":true,"Cnf":{},"Flow":{}}`
+	if err := os.WriteFile(filepath.Join(confDir, "clients.json"), []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"tasks.json", "hosts.json"} {
+		if err := os.WriteFile(filepath.Join(confDir, name), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db := NewJsonDb(runPath)
+	db.LoadClientFromJsonFile()
+	client, err := db.GetClient(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.VerifyKey) != 16 || strings.TrimSpace(client.VerifyKey) == "" {
+		t.Fatalf("legacy empty VerifyKey was not securely rotated: %q", client.VerifyKey)
+	}
+	b, err := os.ReadFile(db.ClientFilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b, []byte(client.VerifyKey)) || !bytes.Contains(b, []byte(credentialPrefix)) {
+		t.Fatal("rotated VerifyKey was not encrypted during migration")
 	}
 }
 

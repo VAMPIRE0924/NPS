@@ -172,7 +172,7 @@ func (s *DbUtils) GetIdByVerifyKey(vKey string, addr string) (id int, err error)
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if common.ConstantTimeEqual(common.Getverifyval(v.VerifyKey), vKey) && v.Status {
+		if strings.TrimSpace(v.VerifyKey) != "" && common.ConstantTimeEqual(common.Getverifyval(v.VerifyKey), vKey) && v.Status {
 			v.Addr = common.GetIpByAddr(addr)
 			id = v.Id
 			exist = true
@@ -445,6 +445,9 @@ func (s *DbUtils) NewClient(c *Client) error {
 }
 
 func (s *DbUtils) VerifyVkey(vkey string, id int) (res bool) {
+	if strings.TrimSpace(vkey) == "" {
+		return false
+	}
 	res = true
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
@@ -461,8 +464,14 @@ func (s *DbUtils) UpdateClient(t *Client) error {
 	if t == nil {
 		return errors.New("client is nil")
 	}
+	if strings.TrimSpace(t.VerifyKey) == "" {
+		return errors.New("Vkey cannot be empty")
+	}
 	s.JsonDb.idLock.Lock()
 	defer s.JsonDb.idLock.Unlock()
+	if !s.VerifyVkey(t.VerifyKey, t.Id) {
+		return errors.New("Vkey duplicate, please reset")
+	}
 	t.WebUserName = ""
 	t.WebPassword = ""
 	ensureClientRuntime(t, false)

@@ -3,6 +3,7 @@ package controllers
 import (
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +65,6 @@ func (self *LoginController) Index() {
 	webBaseUrl := beego.AppConfig.String("web_base_url")
 	self.Data["web_base_url"] = webBaseUrl
 	self.Data["xsrf_token"] = self.XSRFToken()
-	self.Data["register_allow"] = false
 	self.TplName = "login/index.html"
 }
 
@@ -131,14 +131,8 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 }
 
 func matchesClientWebLogin(client *file.Client, username, password string) bool {
-	return client != nil && client.Status && !client.NoDisplay &&
+	return client != nil && client.Status && !client.NoDisplay && strings.TrimSpace(client.VerifyKey) != "" &&
 		common.ConstantTimeEqual(username, "user") && common.ConstantTimeEqual(client.VerifyKey, password)
-}
-
-func (self *LoginController) Register() {
-	self.Ctx.Output.SetStatus(http.StatusNotFound)
-	self.Data["json"] = map[string]interface{}{"status": 0, "msg": "client registration is disabled"}
-	self.ServeJSON()
 }
 
 func (self *LoginController) Out() {
