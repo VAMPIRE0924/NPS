@@ -170,11 +170,7 @@ re:
 	}
 
 	c.Close()
-	if cnf.CommonConfig.Client.WebUserName == "" || cnf.CommonConfig.Client.WebPassword == "" {
-		logs.Notice("web access enabled for the client VerifyKey account")
-	} else {
-		logs.Notice("web access enabled for username:%s", cnf.CommonConfig.Client.WebUserName)
-	}
+	logs.Notice("web access enabled for username:user with the client VerifyKey")
 	NewRPClient(cnf.CommonConfig.Server, vkey, cnf.CommonConfig.Tp, cnf.CommonConfig.ProxyUrl, cnf, cnf.CommonConfig.DisconnectTime).Start()
 	CloseLocalServer()
 	goto re

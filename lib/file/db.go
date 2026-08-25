@@ -172,7 +172,7 @@ func (s *DbUtils) GetIdByVerifyKey(vKey string, addr string) (id int, err error)
 	var exist bool
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
-		if common.ConstantTimeEqual(common.Getverifyval(v.VerifyKey), vKey) && v.Status {
+		if strings.TrimSpace(v.VerifyKey) != "" && common.ConstantTimeEqual(common.Getverifyval(v.VerifyKey), vKey) && v.Status {
 			v.Addr = common.GetIpByAddr(addr)
 			id = v.Id
 			exist = true
@@ -407,9 +407,8 @@ func (s *DbUtils) NewClient(c *Client) error {
 	s.JsonDb.idLock.Lock()
 	defer s.JsonDb.idLock.Unlock()
 	c.Id = 0
-	if c.WebUserName != "" && !s.VerifyUserName(c.WebUserName, 0) {
-		return errors.New("web login username duplicate, please reset")
-	}
+	c.WebUserName = ""
+	c.WebPassword = ""
 
 	autoVerifyKey := c.VerifyKey == ""
 	for {
@@ -446,23 +445,13 @@ func (s *DbUtils) NewClient(c *Client) error {
 }
 
 func (s *DbUtils) VerifyVkey(vkey string, id int) (res bool) {
+	if strings.TrimSpace(vkey) == "" {
+		return false
+	}
 	res = true
 	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
 		v := value.(*Client)
 		if v.VerifyKey == vkey && v.Id != id {
-			res = false
-			return false
-		}
-		return true
-	})
-	return res
-}
-
-func (s *DbUtils) VerifyUserName(username string, id int) (res bool) {
-	res = true
-	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
-		v := value.(*Client)
-		if v.WebUserName == username && v.Id != id {
 			res = false
 			return false
 		}
@@ -477,6 +466,22 @@ func (s *DbUtils) UpdateClient(t *Client) error {
 	}
 	s.JsonDb.idLock.Lock()
 	defer s.JsonDb.idLock.Unlock()
+	t.VerifyKey = strings.TrimSpace(t.VerifyKey)
+	autoVerifyKey := t.VerifyKey == ""
+	for {
+		if t.VerifyKey == "" {
+			t.VerifyKey = crypt.GetRandomString(16)
+		}
+		if s.VerifyVkey(t.VerifyKey, t.Id) {
+			break
+		}
+		if !autoVerifyKey {
+			return errors.New("Vkey duplicate, please reset")
+		}
+		t.VerifyKey = ""
+	}
+	t.WebUserName = ""
+	t.WebPassword = ""
 	ensureClientRuntime(t, false)
 	s.JsonDb.Clients.Store(t.Id, t)
 	if _, err := s.upsertManagedSocksForClientLocked(t); err != nil {

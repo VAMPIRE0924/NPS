@@ -4,7 +4,7 @@
 
 版本边界：
 
-- `v2.0.0` 是当前正式版本基线；`Unreleased` 记录的下一次 `main` 候选继续使用同一套
+- `v2.0.2` 是当前正式版本基线，继续使用同一套
   HMAC-SHA256、复合任务 ID 和 `POST /index/socksstatus/` 合约。
 - 签名按实际发送的原始正文字节计算；空正文伪签名、过期时间戳、nonce 重放和错误签名均拒绝。
 - 管理 API 已完成 Client、Host、五类可手工创建隧道，以及随 Client 自动创建的托管 SOCKS 的
@@ -74,7 +74,8 @@ auth_key=<仅保存在生产密钥系统中的随机密钥>
 通过 TLS；不得把密钥、完整签名请求或包含密码的响应写入日志。
 
 运行后 `auth_key` 在 `nps.conf` 中以 `npsenc:v1:` 密文落盘，解密值只保留在进程内；管理 API
-对 Client VerifyKey、Web/Basic 等字段的既有查询结果不变。迁移必须连同 `conf/credential.key` 整体备份 `conf/`。
+对 Client VerifyKey 和 Basic 等有效字段的既有查询结果不变。历史每 Client Web 用户名/密码已移除，
+不再出现于 API JSON。迁移必须连同 `conf/credential.key` 整体备份 `conf/`。
 
 ### 2.2 请求头
 
@@ -164,7 +165,7 @@ portForward  socks5  httpProxy  secret  p2p  file
 
 ```text
 remark
-vkey                 留空时由服务端生成
+vkey                 新增或编辑时留空由服务端生成；填写时必须唯一
 u
 p
 compress             1/0
@@ -174,8 +175,6 @@ rate_limit           KB/s，0 表示不限制
 flow_limit           MB，0 表示不限制
 max_conn              0 表示不限制
 max_tunnel            0 表示不限制
-web_username
-web_password
 ```
 
 新增可见 Client 时会自动创建一个默认关闭的托管 SOCKS：

@@ -3,6 +3,7 @@ package controllers
 import (
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +65,6 @@ func (self *LoginController) Index() {
 	webBaseUrl := beego.AppConfig.String("web_base_url")
 	self.Data["web_base_url"] = webBaseUrl
 	self.Data["xsrf_token"] = self.XSRFToken()
-	self.Data["register_allow"], _ = beego.AppConfig.Bool("allow_user_register")
 	self.TplName = "login/index.html"
 }
 
@@ -107,21 +107,12 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 			if !v.Status || v.NoDisplay {
 				return true
 			}
-			if v.WebUserName == "" && v.WebPassword == "" {
-				if !common.ConstantTimeEqual(username, "user") || !common.ConstantTimeEqual(v.VerifyKey, password) {
-					return true
-				} else {
-					auth = true
-				}
-			}
-			if !auth && common.ConstantTimeEqual(v.WebPassword, password) && common.ConstantTimeEqual(v.WebUserName, username) {
-				auth = true
-			}
+			auth = matchesClientWebLogin(v, username, password)
 			if auth {
 				self.SessionRegenerateID()
 				self.SetSession("isAdmin", false)
 				self.SetSession("clientId", v.Id)
-				self.SetSession("username", v.WebUserName)
+				self.SetSession("username", "user")
 				return false
 			}
 			return true
@@ -138,40 +129,10 @@ func (self *LoginController) doLogin(username, password string, explicit bool) b
 	}
 	return false
 }
-func (self *LoginController) Register() {
-	if self.Ctx.Request.Method == "GET" {
-		self.Data["web_base_url"] = beego.AppConfig.String("web_base_url")
-		self.Data["xsrf_token"] = self.XSRFToken()
-		self.TplName = "login/register.html"
-	} else {
-		if self.Ctx.Request.Method != http.MethodPost {
-			self.Ctx.Output.SetStatus(http.StatusMethodNotAllowed)
-			return
-		}
-		if b, err := beego.AppConfig.Bool("allow_user_register"); err != nil || !b {
-			self.Data["json"] = map[string]interface{}{"status": 0, "msg": "register is not allow"}
-			self.ServeJSON()
-			return
-		}
-		if self.GetString("username") == "" || self.GetString("password") == "" || self.GetString("username") == beego.AppConfig.String("web_username") {
-			self.Data["json"] = map[string]interface{}{"status": 0, "msg": "please check your input"}
-			self.ServeJSON()
-			return
-		}
-		t := &file.Client{
-			Status:      true,
-			Cnf:         &file.Config{},
-			WebUserName: self.GetString("username"),
-			WebPassword: self.GetString("password"),
-			Flow:        &file.Flow{},
-		}
-		if err := file.GetDb().NewClient(t); err != nil {
-			self.Data["json"] = map[string]interface{}{"status": 0, "msg": err.Error()}
-		} else {
-			self.Data["json"] = map[string]interface{}{"status": 1, "msg": "register success"}
-		}
-		self.ServeJSON()
-	}
+
+func matchesClientWebLogin(client *file.Client, username, password string) bool {
+	return client != nil && client.Status && !client.NoDisplay && strings.TrimSpace(client.VerifyKey) != "" &&
+		common.ConstantTimeEqual(username, "user") && common.ConstantTimeEqual(client.VerifyKey, password)
 }
 
 func (self *LoginController) Out() {

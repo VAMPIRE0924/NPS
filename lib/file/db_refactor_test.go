@@ -162,6 +162,81 @@ func TestClientIdReuseAndManagedSocks(t *testing.T) {
 	}
 }
 
+func TestNewClientVerifyKeyAuthenticatesImmediatelyAndAfterReload(t *testing.T) {
+	db := newTestDb(t)
+	client := newTestClient("openwrt")
+	client.VerifyKey = `open&wrt"'<key>`
+	if err := db.NewClient(client); err != nil {
+		t.Fatal(err)
+	}
+	wireValue := common.Getverifyval(client.VerifyKey)
+	if id, err := db.GetIdByVerifyKey(wireValue, "192.0.2.10:1234"); err != nil || id != client.Id {
+		t.Fatalf("new Client VerifyKey did not authenticate immediately: id=%d err=%v", id, err)
+	}
+
+	reloaded := &DbUtils{JsonDb: NewJsonDb(db.JsonDb.RunPath)}
+	reloaded.JsonDb.LoadClientFromJsonFile()
+	if id, err := reloaded.GetIdByVerifyKey(wireValue, "192.0.2.10:1234"); err != nil || id != client.Id {
+		t.Fatalf("persisted Client VerifyKey did not authenticate after reload: id=%d err=%v", id, err)
+	}
+}
+
+func TestEmptyVerifyKeyUpdateGeneratesNewAuthenticatedKey(t *testing.T) {
+	db := newTestDb(t)
+	client := newTestClient("client")
+	client.VerifyKey = "original-key"
+	if err := db.NewClient(client); err != nil {
+		t.Fatal(err)
+	}
+
+	candidate := &Client{Id: client.Id, VerifyKey: "", Status: true}
+	if err := db.UpdateClient(candidate); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := db.GetClient(client.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.VerifyKey) != 16 || stored.VerifyKey == "original-key" {
+		t.Fatalf("empty VerifyKey update did not generate a new key: %q", stored.VerifyKey)
+	}
+	if db.VerifyVkey("", client.Id) {
+		t.Fatal("empty VerifyKey passed uniqueness validation")
+	}
+	if _, err := db.GetIdByVerifyKey(common.Getverifyval(""), "192.0.2.10:1234"); err == nil {
+		t.Fatal("empty VerifyKey authenticated on the NPC wire protocol")
+	}
+	if id, err := db.GetIdByVerifyKey(common.Getverifyval(stored.VerifyKey), "192.0.2.10:1234"); err != nil || id != client.Id {
+		t.Fatalf("generated VerifyKey did not authenticate: id=%d err=%v", id, err)
+	}
+}
+
+func TestUpdateClientRejectsDuplicateVerifyKey(t *testing.T) {
+	db := newTestDb(t)
+	first := newTestClient("first")
+	first.VerifyKey = "first-key"
+	second := newTestClient("second")
+	second.VerifyKey = "second-key"
+	if err := db.NewClient(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.NewClient(second); err != nil {
+		t.Fatal(err)
+	}
+
+	candidate := &Client{Id: second.Id, VerifyKey: first.VerifyKey}
+	if err := db.UpdateClient(candidate); err == nil {
+		t.Fatal("duplicate VerifyKey update was accepted")
+	}
+	stored, err := db.GetClient(second.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.VerifyKey != "second-key" {
+		t.Fatalf("rejected duplicate update changed stored VerifyKey to %q", stored.VerifyKey)
+	}
+}
+
 func TestNewTaskRejectsUnsupportedMode(t *testing.T) {
 	db := newTestDb(t)
 	client := newTestClient("client")

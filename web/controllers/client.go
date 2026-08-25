@@ -46,7 +46,7 @@ func (s *ClientController) Add() {
 	}
 	s.requirePost()
 	t := &file.Client{
-		VerifyKey: s.getEscapeString("vkey"),
+		VerifyKey: normalizeVerifyKeyInput(s.GetString("vkey")),
 		Status:    true,
 		Remark:    s.getEscapeString("remark"),
 		Cnf: &file.Config{
@@ -58,8 +58,6 @@ func (s *ClientController) Add() {
 		ConfigConnAllow: s.GetBoolNoErr("config_conn_allow"),
 		RateLimit:       s.GetIntNoErr("rate_limit"),
 		MaxConn:         s.GetIntNoErr("max_conn"),
-		WebUserName:     s.getEscapeString("web_username"),
-		WebPassword:     s.GetString("web_password"),
 		MaxTunnelNum:    s.GetIntNoErr("max_tunnel"),
 		Flow: &file.Flow{
 			ExportFlow: 0,
@@ -140,18 +138,13 @@ func (s *ClientController) Edit() {
 		s.AjaxErr("client ID not found")
 		return
 	}
-	if s.getEscapeString("web_username") != "" {
-		if s.getEscapeString("web_username") == beego.AppConfig.String("web_username") || !file.GetDb().VerifyUserName(s.getEscapeString("web_username"), c.Id) {
-			s.AjaxErr("web login username duplicate, please reset")
-			return
-		}
-	}
 	if s.isAdminRequest() {
-		if !file.GetDb().VerifyVkey(s.getEscapeString("vkey"), c.Id) {
+		verifyKey := normalizeVerifyKeyInput(s.GetString("vkey"))
+		if verifyKey != "" && !file.GetDb().VerifyVkey(verifyKey, c.Id) {
 			s.AjaxErr("Vkey duplicate, please reset")
 			return
 		}
-		c.VerifyKey = s.getEscapeString("vkey")
+		c.VerifyKey = verifyKey
 		c.Flow.FlowLimit = int64(s.GetIntNoErr("flow_limit"))
 		c.RateLimit = s.GetIntNoErr("rate_limit")
 		c.MaxConn = s.GetIntNoErr("max_conn")
@@ -165,11 +158,6 @@ func (s *ClientController) Edit() {
 	c.Cnf.P = s.GetString("p")
 	c.Cnf.Compress = common.GetBoolByStr(s.getEscapeString("compress"))
 	c.Cnf.Crypt = s.GetBoolNoErr("crypt")
-	b, err := beego.AppConfig.Bool("allow_user_change_username")
-	if s.isAdminRequest() || (err == nil && b) {
-		c.WebUserName = s.getEscapeString("web_username")
-	}
-	c.WebPassword = s.GetString("web_password")
 	if s.isAdminRequest() {
 		c.ConfigConnAllow = s.GetBoolNoErr("config_conn_allow")
 	}
@@ -187,6 +175,10 @@ func (s *ClientController) Edit() {
 		s.AjaxErr(err.Error())
 	}
 	s.AjaxOk("save success")
+}
+
+func normalizeVerifyKeyInput(value string) string {
+	return strings.TrimSpace(value)
 }
 
 func (s *ClientController) ChangeStatus() {

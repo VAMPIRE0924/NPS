@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"ehang.io/nps/lib/file"
 )
 
 func TestLoginAttemptStoreBlocksAndExpires(t *testing.T) {
@@ -38,5 +40,36 @@ func TestLoginAttemptStoreConcurrentFailures(t *testing.T) {
 	store.success("127.0.0.1")
 	if store.blocked("127.0.0.1", now) {
 		t.Fatal("successful login must clear failures")
+	}
+}
+
+func TestClientWebLoginUsesOnlyUserAndVerifyKey(t *testing.T) {
+	client := &file.Client{
+		Status:      true,
+		VerifyKey:   "device-verify-key",
+		WebUserName: "legacy-name",
+		WebPassword: "legacy-password",
+	}
+	if !matchesClientWebLogin(client, "user", client.VerifyKey) {
+		t.Fatal("fixed user + Client VerifyKey login must remain available")
+	}
+	if matchesClientWebLogin(client, client.WebUserName, client.WebPassword) {
+		t.Fatal("legacy per-client Web username/password must not authenticate")
+	}
+	if matchesClientWebLogin(client, "user", "wrong-key") {
+		t.Fatal("wrong VerifyKey authenticated")
+	}
+}
+
+func TestDisabledOrHiddenClientCannotLogIn(t *testing.T) {
+	for _, client := range []*file.Client{
+		{Status: false, VerifyKey: "key"},
+		{Status: true, NoDisplay: true, VerifyKey: "key"},
+		{Status: true, VerifyKey: ""},
+		{Status: true, VerifyKey: "   "},
+	} {
+		if matchesClientWebLogin(client, "user", "key") {
+			t.Fatal("disabled or hidden Client authenticated")
+		}
 	}
 }

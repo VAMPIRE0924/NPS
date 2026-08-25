@@ -257,12 +257,13 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 		}
 	case common.WORK_CONFIG:
 		client, err := file.GetDb().GetClient(id)
-		if err != nil || (!isPub && !client.ConfigConnAllow) {
+		acceptConfigConnection, applyConfig := clientConfigAccess(isPub, client)
+		if err != nil || !acceptConfigConnection {
 			c.Close()
 			return
 		}
 		binary.Write(c, binary.LittleEndian, isPub)
-		go s.getConfig(c, isPub, client)
+		go s.getConfig(c, isPub, client, applyConfig)
 	case common.WORK_REGISTER:
 		go s.register(c)
 	case common.WORK_SECRET:
@@ -302,6 +303,13 @@ func (s *Bridge) typeDeal(typeVal string, c *conn.Conn, id int, vs string) {
 	}
 	c.SetAlive(s.tunnelType)
 	return
+}
+
+func clientConfigAccess(isPub bool, client *file.Client) (acceptConnection, applyConfig bool) {
+	if client == nil {
+		return false, false
+	}
+	return true, isPub || client.ConfigConnAllow
 }
 
 // register ip
@@ -389,7 +397,7 @@ func (s *Bridge) ping() {
 }
 
 // get config and add task from client config
-func (s *Bridge) getConfig(c *conn.Conn, isPub bool, client *file.Client) {
+func (s *Bridge) getConfig(c *conn.Conn, isPub bool, client *file.Client, applyConfig bool) {
 	var fail bool
 loop:
 	for {
@@ -403,24 +411,26 @@ loop:
 				break loop
 			} else {
 				var str string
-				id, err := file.GetDb().GetClientIdByVkey(string(b))
-				if err != nil {
-					break loop
+				if applyConfig {
+					id, err := file.GetDb().GetClientIdByVkey(string(b))
+					if err != nil {
+						break loop
+					}
+					file.GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
+						v := value.(*file.Host)
+						if v.Client.Id == id {
+							str += v.Remark + common.CONN_DATA_SEQ
+						}
+						return true
+					})
+					file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
+						v := value.(*file.Tunnel)
+						if _, ok := s.runList.Load(file.TaskMapKey(v)); ok && v.Client.Id == id {
+							str += v.Remark + common.CONN_DATA_SEQ
+						}
+						return true
+					})
 				}
-				file.GetDb().JsonDb.Hosts.Range(func(key, value interface{}) bool {
-					v := value.(*file.Host)
-					if v.Client.Id == id {
-						str += v.Remark + common.CONN_DATA_SEQ
-					}
-					return true
-				})
-				file.GetDb().JsonDb.Tasks.Range(func(key, value interface{}) bool {
-					v := value.(*file.Tunnel)
-					if _, ok := s.runList.Load(file.TaskMapKey(v)); ok && v.Client.Id == id {
-						str += v.Remark + common.CONN_DATA_SEQ
-					}
-					return true
-				})
 				payload, err := conn.GetLenBytes([]byte(str))
 				if err != nil {
 					logs.Error("encode work status error", err)
@@ -433,6 +443,10 @@ loop:
 		case common.NEW_CONF:
 			var err error
 			if client, err = c.GetConfigInfo(); err != nil {
+				fail = true
+				c.WriteAddFail()
+				break loop
+			} else if !isPub || !applyConfig {
 				fail = true
 				c.WriteAddFail()
 				break loop
@@ -452,6 +466,13 @@ loop:
 				fail = true
 				c.WriteAddFail()
 				break loop
+			}
+			if !applyConfig {
+				// Legacy NPC treats a negative acknowledgement as fatal and never
+				// starts its main connection. Acknowledge only at the protocol layer;
+				// the client-reported rule is deliberately not applied or stored.
+				c.WriteAddOk()
+				break
 			}
 			h.Client = client
 			if h.Location == "" {
@@ -479,6 +500,10 @@ loop:
 				fail = true
 				c.WriteAddFail()
 				break loop
+			} else if !applyConfig {
+				// See NEW_HOST above: this acknowledgement only lets the unchanged
+				// NPC finish startup. Server-side state remains authoritative.
+				c.WriteAddOk()
 			} else {
 				t.Mode = file.CanonicalTaskMode(t.Mode)
 				if !file.IsSupportedTaskMode(t.Mode) {
