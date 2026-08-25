@@ -74,9 +74,9 @@ type Client struct {
 	NoDisplay       bool       //no display on web
 	MaxConn         int        //the max connection num of client allow
 	NowConn         int32      //the connection num of now
-	WebUserName     string     //the username of web login
-	WebPassword     string     //the password of web login
-	ConfigConnAllow bool       //is allow connected by config file
+	WebUserName     string     `json:"-"` // legacy NPC config input; not a server-side login identity
+	WebPassword     string     `json:"-"` // legacy NPC config input; not a server-side login credential
+	ConfigConnAllow bool       // whether an NPC config file may create server-side rules
 	MaxTunnelNum    int
 	Version         string
 	sync.RWMutex

@@ -65,3 +65,28 @@ func TestFileTunnelRemainsAvailableInAddAndEditForms(t *testing.T) {
 		}
 	}
 }
+
+func TestClientFormsDoNotExposeLegacyWebCredentials(t *testing.T) {
+	for _, name := range []string{
+		filepath.Join("..", "views", "client", "add.html"),
+		filepath.Join("..", "views", "client", "edit.html"),
+		filepath.Join("..", "views", "client", "list.html"),
+	} {
+		contents, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, legacyField := range []string{"web_username", "web_password", "WebUserName", "WebPassword"} {
+			if strings.Contains(string(contents), legacyField) {
+				t.Fatalf("%s still exposes legacy client Web credential %s", name, legacyField)
+			}
+		}
+	}
+}
+
+func TestVerifyKeyInputIsNotHTMLEscaped(t *testing.T) {
+	const verifyKey = `open&wrt"'<key>`
+	if got := normalizeVerifyKeyInput("  " + verifyKey + "  "); got != verifyKey {
+		t.Fatalf("VerifyKey input changed: got %q want %q", got, verifyKey)
+	}
+}

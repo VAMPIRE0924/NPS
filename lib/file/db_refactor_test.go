@@ -162,6 +162,25 @@ func TestClientIdReuseAndManagedSocks(t *testing.T) {
 	}
 }
 
+func TestNewClientVerifyKeyAuthenticatesImmediatelyAndAfterReload(t *testing.T) {
+	db := newTestDb(t)
+	client := newTestClient("openwrt")
+	client.VerifyKey = `open&wrt"'<key>`
+	if err := db.NewClient(client); err != nil {
+		t.Fatal(err)
+	}
+	wireValue := common.Getverifyval(client.VerifyKey)
+	if id, err := db.GetIdByVerifyKey(wireValue, "192.0.2.10:1234"); err != nil || id != client.Id {
+		t.Fatalf("new Client VerifyKey did not authenticate immediately: id=%d err=%v", id, err)
+	}
+
+	reloaded := &DbUtils{JsonDb: NewJsonDb(db.JsonDb.RunPath)}
+	reloaded.JsonDb.LoadClientFromJsonFile()
+	if id, err := reloaded.GetIdByVerifyKey(wireValue, "192.0.2.10:1234"); err != nil || id != client.Id {
+		t.Fatalf("persisted Client VerifyKey did not authenticate after reload: id=%d err=%v", id, err)
+	}
+}
+
 func TestNewTaskRejectsUnsupportedMode(t *testing.T) {
 	db := newTestDb(t)
 	client := newTestClient("client")

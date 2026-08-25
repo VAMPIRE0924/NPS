@@ -1,6 +1,7 @@
 package file
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,6 +103,9 @@ func (s *JsonDb) LoadClientFromJsonFile() {
 			panic(fmt.Errorf("decrypt %s: %w", s.ClientFilePath, err))
 		}
 		changed = changed || migrated
+		if bytes.Contains(decoded, []byte(`"WebUserName"`)) || bytes.Contains(decoded, []byte(`"WebPassword"`)) {
+			changed = true
+		}
 		if json.Unmarshal(decoded, &post) != nil {
 			return
 		}

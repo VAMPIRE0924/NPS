@@ -18,6 +18,9 @@ func TestCredentialPersistenceEncryptsAtRestAndConfBackupMigrates(t *testing.T) 
 	if err := db.NewClient(client); err != nil {
 		t.Fatal(err)
 	}
+	if client.WebUserName != "" || client.WebPassword != "" {
+		t.Fatal("legacy per-client Web credentials were not discarded")
+	}
 	task := newTestTask("secret", client)
 	task.Password = "visitor-password"
 	task.MultiAccount = &MultiAccount{AccountMap: map[string]string{"alice": "multi-account-password"}}
@@ -45,7 +48,7 @@ func TestCredentialPersistenceEncryptsAtRestAndConfBackupMigrates(t *testing.T) 
 			t.Fatalf("%s does not contain encrypted credential marker", path)
 		}
 	}
-	if client.VerifyKey != "client-verify-key" || client.WebPassword != "client-web-password" || client.Cnf.P != "proxy-password" {
+	if client.VerifyKey != "client-verify-key" || client.Cnf.P != "proxy-password" {
 		t.Fatal("in-memory values changed after encrypted persistence")
 	}
 
@@ -58,7 +61,7 @@ func TestCredentialPersistenceEncryptsAtRestAndConfBackupMigrates(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restoredClient.VerifyKey != client.VerifyKey || restoredClient.WebPassword != client.WebPassword || restoredClient.Cnf.P != client.Cnf.P {
+	if restoredClient.VerifyKey != client.VerifyKey || restoredClient.Cnf.P != client.Cnf.P || restoredClient.WebUserName != "" || restoredClient.WebPassword != "" {
 		t.Fatal("restored client credentials do not match")
 	}
 	restoredTask, err := restored.ResolveTask("secret", task.Id)
@@ -95,7 +98,7 @@ func TestLegacyPlaintextCredentialsMigrateOnLoad(t *testing.T) {
 	if err := os.MkdirAll(confDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	legacy := `{"Id":1,"VerifyKey":"legacy-vkey","WebPassword":"legacy-password","Cnf":{"U":"u","P":"legacy-basic"},"Flow":{}}`
+	legacy := `{"Id":1,"VerifyKey":"legacy-vkey","WebUserName":"legacy-user","WebPassword":"legacy-password","Cnf":{"U":"u","P":"legacy-basic"},"Flow":{}}`
 	if err := os.WriteFile(filepath.Join(confDir, "clients.json"), []byte(legacy), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +113,7 @@ func TestLegacyPlaintextCredentialsMigrateOnLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client.VerifyKey != "legacy-vkey" || client.WebPassword != "legacy-password" || client.Cnf.P != "legacy-basic" {
+	if client.VerifyKey != "legacy-vkey" || client.Cnf.P != "legacy-basic" || client.WebUserName != "" || client.WebPassword != "" {
 		t.Fatal("legacy credential values changed during migration")
 	}
 	b, err := os.ReadFile(db.ClientFilePath)
@@ -119,6 +122,9 @@ func TestLegacyPlaintextCredentialsMigrateOnLoad(t *testing.T) {
 	}
 	if bytes.Contains(b, []byte("legacy-vkey")) || bytes.Contains(b, []byte("legacy-password")) || bytes.Contains(b, []byte("legacy-basic")) {
 		t.Fatal("legacy plaintext credentials were not encrypted after load")
+	}
+	if bytes.Contains(b, []byte("WebUserName")) || bytes.Contains(b, []byte("WebPassword")) {
+		t.Fatal("obsolete per-client Web credential fields were not removed during migration")
 	}
 }
 

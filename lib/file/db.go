@@ -407,9 +407,8 @@ func (s *DbUtils) NewClient(c *Client) error {
 	s.JsonDb.idLock.Lock()
 	defer s.JsonDb.idLock.Unlock()
 	c.Id = 0
-	if c.WebUserName != "" && !s.VerifyUserName(c.WebUserName, 0) {
-		return errors.New("web login username duplicate, please reset")
-	}
+	c.WebUserName = ""
+	c.WebPassword = ""
 
 	autoVerifyKey := c.VerifyKey == ""
 	for {
@@ -458,25 +457,14 @@ func (s *DbUtils) VerifyVkey(vkey string, id int) (res bool) {
 	return res
 }
 
-func (s *DbUtils) VerifyUserName(username string, id int) (res bool) {
-	res = true
-	s.JsonDb.Clients.Range(func(key, value interface{}) bool {
-		v := value.(*Client)
-		if v.WebUserName == username && v.Id != id {
-			res = false
-			return false
-		}
-		return true
-	})
-	return res
-}
-
 func (s *DbUtils) UpdateClient(t *Client) error {
 	if t == nil {
 		return errors.New("client is nil")
 	}
 	s.JsonDb.idLock.Lock()
 	defer s.JsonDb.idLock.Unlock()
+	t.WebUserName = ""
+	t.WebPassword = ""
 	ensureClientRuntime(t, false)
 	s.JsonDb.Clients.Store(t.Id, t)
 	if _, err := s.upsertManagedSocksForClientLocked(t); err != nil {
